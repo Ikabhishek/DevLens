@@ -40,5 +40,22 @@
   "overrides": {
     "diff": "^8.0.4",
     "serialize-javascript": "^7.0.6"
-  }
+  },
+"viewsContainers": {
+    "activitybar": [
+        {
+            "id": "devlens",
+            "title": "DevLens",
+            "icon": "resources/devlens.svg"
+        }
+    ]
+},
+"views": {
+    "devlens": [
+        {
+            "id": "devlens.projectView",
+            "name": "Project"
+        }
+    ]
+}
 }
