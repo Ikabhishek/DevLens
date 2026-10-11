@@ -1,4 +1,6 @@
-
+import { scanProject } from './scanner/projectScanner';
+import { analyzeImportsAndExports } from './analyzer/importExportAnalyzer';
+import { buildDependencyGraph } from './graph/dependencyGraph';
 import * as vscode from 'vscode';
 import { scanProject } from './scanner/projectScanner';
 
