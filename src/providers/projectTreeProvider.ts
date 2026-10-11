@@ -9,12 +9,16 @@ export class ProjectTreeProvider
 
     getChildren(): vscode.TreeItem[] {
 
-        return [
-            new vscode.TreeItem(
-                'Analyze Project',
-                vscode.TreeItemCollapsibleState.None
-            )
-        ];
+        const item = new vscode.TreeItem(
+            'Analyze Project',
+            vscode.TreeItemCollapsibleState.None
+        );
 
+        item.command = {
+            command: 'devlens.analyzeProject',
+            title: 'Analyze Project'
+        };
+
+        return [item];
     }
 }
