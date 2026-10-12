@@ -3,8 +3,27 @@ import { buildDependencyGraph } from './graph/dependencyGraph';
 import * as vscode from 'vscode';
 import { scanProject } from './scanner/projectScanner';
 import { showArchitecturePanel } from './providers/architecturePanel';
+import { ProjectTreeProvider } from './providers/projectTreeProvider';
 
 export function activate(context: vscode.ExtensionContext) {
+    const projectTreeProvider = new ProjectTreeProvider();
+
+context.subscriptions.push(
+    vscode.window.registerTreeDataProvider(
+        'devlens.projectView',
+        projectTreeProvider
+    ),
+    projectTreeProvider
+);
+
+const refreshDashboard = vscode.commands.registerCommand(
+    'devlens.refreshDashboard',
+    () => {
+        projectTreeProvider.refresh();
+    }
+);
+
+context.subscriptions.push(refreshDashboard);
     const analyzeProject = vscode.commands.registerCommand(
         'devlens.analyzeProject',
         async () => {
