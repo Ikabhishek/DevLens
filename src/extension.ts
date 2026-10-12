@@ -74,7 +74,10 @@ const analysis = await analyzeImportsAndExports(
     project.files.map(file => file.relativePath)
 );
 
-const graph = buildDependencyGraph(analysis);
+const graph = buildDependencyGraph(
+    analysis,
+    project.files.map(file => file.relativePath)
+);
 
 const message = [
     `Files analyzed: ${analysis.modules.length}`,
@@ -139,7 +142,10 @@ const visualizeArchitecture = vscode.commands.registerCommand(
                         project.files.map(file => file.relativePath)
                     );
 
-                    const graph = buildDependencyGraph(analysis);
+                    const graph = buildDependencyGraph(
+    analysis,
+    project.files.map(file => file.relativePath)
+);
 
                     showArchitecturePanel(graph, workspace.uri);
                 }

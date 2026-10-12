@@ -36,7 +36,8 @@
         "devlens": [
             {
                 "id": "devlens.projectView",
-                "name": "Project"
+                "name": "Project",
+                "icon": "resources/devlens.svg"
             }
         ]
     }

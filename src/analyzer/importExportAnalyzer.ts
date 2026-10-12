@@ -1,3 +1,4 @@
+
 import * as vscode from 'vscode';
 import * as ts from 'typescript';
 import * as path from 'path';
@@ -33,48 +34,20 @@ export interface ImportExportAnalysis {
     }[];
 }
 
-
-function getModuleSpecifier(
-    node: ts.Node
-): string | undefined {
-    if (
-        (ts.isImportDeclaration(node) ||
-         ts.isExportDeclaration(node)) &&
-        node.moduleSpecifier &&
-        ts.isStringLiteral(node.moduleSpecifier)
-    ) {
-        return node.moduleSpecifier.text;
-    }
-
-    if (
-        ts.isCallExpression(node) &&
-        node.arguments.length > 0
-    ) {
-        const first = node.arguments[0];
-
-        if (ts.isStringLiteral(first)) {
-            if (
-                node.expression.kind ===
-                ts.SyntaxKind.ImportKeyword
-            ) {
-                return first.text;
-            }
-
-            if (
-                ts.isIdentifier(node.expression) &&
-                node.expression.text === 'require'
-            ) {
-                return first.text;
-            }
-        }
-    }
-
-    return undefined;
+function normalizeRelativePath(filePath: string): string {
+    return path.posix.normalize(filePath.replace(/\\/g, '/'));
 }
 
-function getImportNames(
-    node: ts.ImportDeclaration
-): string[] {
+
+function getImportNames(node: ts.ImportDeclaration): string[] {
+    const source = ts.isStringLiteral(node.moduleSpecifier)
+        ? node.moduleSpecifier.text
+        : '';
+
+    if (/\.(css|scss|sass|less)$/i.test(source)) {
+        return ['stylesheet'];
+    }
+
     const clause = node.importClause;
 
     if (!clause) {
@@ -91,14 +64,10 @@ function getImportNames(
 
     if (bindings && ts.isNamespaceImport(bindings)) {
         names.push('*');
-    } else if (
-        bindings &&
-        ts.isNamedImports(bindings)
-    ) {
+    } else if (bindings && ts.isNamedImports(bindings)) {
         for (const element of bindings.elements) {
             names.push(
-                element.propertyName?.text ??
-                element.name.text
+                element.propertyName?.text ?? element.name.text
             );
         }
     }
@@ -106,67 +75,54 @@ function getImportNames(
     return names;
 }
 
+
 function resolveLocalImport(
     source: string,
-    importer: vscode.Uri,
+    importerRelativePath: string,
     knownFiles: Set<string>
 ): string | undefined {
     if (!source.startsWith('.')) {
         return undefined;
     }
 
-    const base = path.posix.normalize(
+    const base = normalizeRelativePath(
         path.posix.join(
-            path.posix.dirname(importer.path),
+            path.posix.dirname(importerRelativePath),
             source
         )
     );
 
-    const candidates = [
-        base,
-        ...[
-            '.ts', '.tsx', '.js', '.jsx',
-            '.mts', '.cts', '.mjs', '.cjs',
-            '.json'
-        ].map(ext => base + ext),
-        ...[
-            'index.ts', 'index.tsx',
-            'index.js', 'index.jsx'
-        ].map(index => path.posix.join(base, index))
+    const extensions = [
+        '.ts', '.tsx', '.js', '.jsx',
+        '.mts', '.cts', '.mjs', '.cjs',
+        '.json', '.css', '.scss', '.sass', '.less'
     ];
 
-    return candidates.find(candidate =>
-        knownFiles.has(candidate)
+    const indexFiles = extensions.map(ext =>
+        path.posix.join(base, `index${ext}`)
     );
+
+    const candidates = [
+        base,
+        ...extensions.map(ext => base + ext),
+        ...indexFiles
+    ];
+
+    return candidates.find(candidate => knownFiles.has(candidate));
 }
 
 export async function analyzeImportsAndExports(
     root: vscode.Uri,
     relativePaths: string[]
 ): Promise<ImportExportAnalysis> {
-    const knownFiles = new Set(
-        relativePaths.map(relativePath =>
-            path.posix.join(
-                root.path,
-                relativePath.replace(/\\/g, '/')
-            )
-        )
-    );
+    const normalizedPaths = relativePaths.map(normalizeRelativePath);
+    const knownFiles = new Set(normalizedPaths);
 
     const modules: FileModuleInfo[] = [];
-    const unresolvedImports: ImportExportAnalysis[
-        'unresolvedImports'
-    ] = [];
+    const unresolvedImports: ImportExportAnalysis['unresolvedImports'] = [];
 
-    for (const relativePath of relativePaths) {
-        const uri = vscode.Uri.joinPath(
-            root,
-            ...relativePath.split(/[\\/]/)
-        );
-
-        const extension = path.posix.extname(
-            relativePath
-        ).toLowerCase();
+    for (const relativePath of normalizedPaths) {
+        const extension = path.posix.extname(relativePath).toLowerCase();
 
         if (![
             '.ts', '.tsx', '.js', '.jsx',
@@ -174,6 +130,11 @@ export async function analyzeImportsAndExports(
         ].includes(extension)) {
             continue;
         }
+
+        const uri = vscode.Uri.joinPath(
+            root,
+            ...relativePath.split('/')
+        );
 
         let content: Uint8Array;
 
@@ -185,19 +146,19 @@ export async function analyzeImportsAndExports(
 
         const sourceText = Buffer.from(content).toString('utf8');
 
+        const scriptKind =
+            extension === '.tsx' ? ts.ScriptKind.TSX :
+            extension === '.jsx' ? ts.ScriptKind.JSX :
+            ['.js', '.mjs', '.cjs'].includes(extension)
+                ? ts.ScriptKind.JS
+                : ts.ScriptKind.TS;
+
         const sourceFile = ts.createSourceFile(
             relativePath,
             sourceText,
             ts.ScriptTarget.Latest,
             true,
-            extension.endsWith('x')
-                ? ts.ScriptKind.TSX
-                : extension.endsWith('js') ||
-                  extension.endsWith('jsx') ||
-                  extension.endsWith('mjs') ||
-                  extension.endsWith('cjs')
-                    ? ts.ScriptKind.JS
-                    : ts.ScriptKind.TS
+            scriptKind
         );
 
         const moduleInfo: FileModuleInfo = {
@@ -213,39 +174,41 @@ export async function analyzeImportsAndExports(
                 ).line + 1;
 
             if (
-    ts.isImportDeclaration(node) &&
-    ts.isStringLiteral(node.moduleSpecifier)
-) {
-    const source = node.moduleSpecifier.text;
+                ts.isImportDeclaration(node) &&
+                ts.isStringLiteral(node.moduleSpecifier)
+            ) {
+                const source = node.moduleSpecifier.text;
+                const isRelative = source.startsWith('.');
+                const resolvedPath = resolveLocalImport(
+                    source,
+                    relativePath,
+                    knownFiles
+                );
 
-    const resolvedPath = resolveLocalImport(
-        source,
-        uri,
-        knownFiles
-    );
+                moduleInfo.imports.push({
+                    source,
+                    resolvedPath,
+                    importedNames: getImportNames(node),
+                    isTypeOnly: node.importClause?.isTypeOnly ?? false,
+                    isExternal: !isRelative,
+                    line
+                });
 
-    moduleInfo.imports.push({
-        source,
-        resolvedPath,
-        importedNames: getImportNames(node),
-        isTypeOnly: node.importClause?.isTypeOnly ?? false,
-        isExternal: !source.startsWith('.'),
-        line
-    });
+                if (isRelative && !resolvedPath) {
+                    unresolvedImports.push({
+                        filePath: relativePath,
+                        source,
+                        line
+                    });
+                }
+            }
 
-    if (source.startsWith('.') && !resolvedPath) {
-        unresolvedImports.push({
-            filePath: relativePath,
-            source,
-            line
-        });
-    }
-}
             if (ts.isExportDeclaration(node)) {
-                const source = node.moduleSpecifier &&
+                const source =
+                    node.moduleSpecifier &&
                     ts.isStringLiteral(node.moduleSpecifier)
-                    ? node.moduleSpecifier.text
-                    : undefined;
+                        ? node.moduleSpecifier.text
+                        : undefined;
 
                 if (source) {
                     moduleInfo.exports.push({
@@ -254,17 +217,16 @@ export async function analyzeImportsAndExports(
                         isTypeOnly: node.isTypeOnly,
                         line
                     });
-                } else if (node.exportClause &&
-                           ts.isNamedExports(node.exportClause)) {
-                    for (
-                        const element of node.exportClause.elements
-                    ) {
+                } else if (
+                    node.exportClause &&
+                    ts.isNamedExports(node.exportClause)
+                ) {
+                    for (const element of node.exportClause.elements) {
                         moduleInfo.exports.push({
                             name: element.name.text,
                             kind: 'named',
                             isTypeOnly:
-                                node.isTypeOnly ||
-                                element.isTypeOnly,
+                                node.isTypeOnly || element.isTypeOnly,
                             line
                         });
                     }
@@ -296,13 +258,10 @@ export async function analyzeImportsAndExports(
                  ts.isVariableStatement(node)) &&
                 node.modifiers?.some(
                     modifier =>
-                        modifier.kind ===
-                        ts.SyntaxKind.ExportKeyword
+                        modifier.kind === ts.SyntaxKind.ExportKeyword
                 )
             ) {
-                if (
-                    ts.isVariableStatement(node)
-                ) {
+                if (ts.isVariableStatement(node)) {
                     for (const declaration of
                         node.declarationList.declarations) {
                         if (ts.isIdentifier(declaration.name)) {
@@ -328,28 +287,12 @@ export async function analyzeImportsAndExports(
                 }
             }
 
-            const specifier = getModuleSpecifier(node);
-
-            if (
-                specifier &&
-                (ts.isCallExpression(node) ||
-                 ts.isImportDeclaration(node))
-            ) {
-                // CommonJS and dynamic imports are handled
-                // separately below in a future enhancement.
-            }
-
             ts.forEachChild(node, visit);
         }
 
         visit(sourceFile);
-
         modules.push(moduleInfo);
     }
 
-    return {
-        modules,
-        unresolvedImports
-    };
+    return { modules, unresolvedImports };
 }
-
