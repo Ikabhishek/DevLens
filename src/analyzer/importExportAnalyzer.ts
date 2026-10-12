@@ -212,36 +212,35 @@ export async function analyzeImportsAndExports(
                     node.getStart(sourceFile)
                 ).line + 1;
 
-            if (ts.isImportDeclaration(node)) {
-                const source = node.moduleSpecifier.text;
-                const resolvedPath = resolveLocalImport(
-                    source,
-                    uri,
-                    knownFiles
-                );
+            if (
+    ts.isImportDeclaration(node) &&
+    ts.isStringLiteral(node.moduleSpecifier)
+) {
+    const source = node.moduleSpecifier.text;
 
-                moduleInfo.imports.push({
-                    source,
-                    resolvedPath,
-                    importedNames: getImportNames(node),
-                    isTypeOnly:
-                        node.importClause?.isTypeOnly ?? false,
-                    isExternal: !source.startsWith('.'),
-                    line
-                });
+    const resolvedPath = resolveLocalImport(
+        source,
+        uri,
+        knownFiles
+    );
 
-                if (
-                    source.startsWith('.') &&
-                    !resolvedPath
-                ) {
-                    unresolvedImports.push({
-                        filePath: relativePath,
-                        source,
-                        line
-                    });
-                }
-            }
+    moduleInfo.imports.push({
+        source,
+        resolvedPath,
+        importedNames: getImportNames(node),
+        isTypeOnly: node.importClause?.isTypeOnly ?? false,
+        isExternal: !source.startsWith('.'),
+        line
+    });
 
+    if (source.startsWith('.') && !resolvedPath) {
+        unresolvedImports.push({
+            filePath: relativePath,
+            source,
+            line
+        });
+    }
+}
             if (ts.isExportDeclaration(node)) {
                 const source = node.moduleSpecifier &&
                     ts.isStringLiteral(node.moduleSpecifier)
@@ -353,3 +352,4 @@ export async function analyzeImportsAndExports(
         unresolvedImports
     };
 }
+

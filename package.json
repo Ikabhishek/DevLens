@@ -11,31 +11,37 @@
   ],
   "activationEvents": [],
   "main": "./out/extension.js",
-  "contributes": {
+  
+"contributes": {
     "commands": [
-      {
-        "command": "devlens.analyzeProject",
-        "title": "DevLens: Analyze Project"
-      }
+        {
+            "command": "devlens.analyzeProject",
+            "title": "DevLens: Analyze Project"
+        },
+        {
+            "command": "devlens.visualizeArchitecture",
+            "title": "DevLens: Visualize Architecture"
+        }
     ],
     "viewsContainers": {
-      "activitybar": [
-        {
-          "id": "devlens",
-          "title": "DevLens",
-          "icon": "resources/devlens.svg"
-        }
-      ]
+        "activitybar": [
+            {
+                "id": "devlens",
+                "title": "DevLens",
+                "icon": "resources/devlens.svg"
+            }
+        ]
     },
     "views": {
-      "devlens": [
-        {
-          "id": "devlens.projectView",
-          "name": "Project"
-        }
-      ]
+        "devlens": [
+            {
+                "id": "devlens.projectView",
+                "name": "Project"
+            }
+        ]
     }
-  },
+}
+,
   "scripts": {
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",

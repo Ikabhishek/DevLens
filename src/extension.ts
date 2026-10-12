@@ -1,8 +1,8 @@
-import { scanProject } from './scanner/projectScanner';
 import { analyzeImportsAndExports } from './analyzer/importExportAnalyzer';
 import { buildDependencyGraph } from './graph/dependencyGraph';
 import * as vscode from 'vscode';
 import { scanProject } from './scanner/projectScanner';
+import { showArchitecturePanel } from './providers/architecturePanel';
 
 export function activate(context: vscode.ExtensionContext) {
     const analyzeProject = vscode.commands.registerCommand(
@@ -15,6 +15,7 @@ export function activate(context: vscode.ExtensionContext) {
                     'DevLens: Open a project folder first.'
                 );
                 return;
+
             }
 
             try {
@@ -28,7 +29,7 @@ export function activate(context: vscode.ExtensionContext) {
                         const project = await scanProject(
                             workspace.uri
                         );
-
+                        
                         const languages = Object.entries(
                             project.languageCounts
                         )
@@ -67,6 +68,35 @@ export function activate(context: vscode.ExtensionContext) {
                             '[DevLens] Project model:',
                             project
                         );
+                        
+const analysis = await analyzeImportsAndExports(
+    workspace.uri,
+    project.files.map(file => file.relativePath)
+);
+
+const graph = buildDependencyGraph(analysis);
+
+const message = [
+    `Files analyzed: ${analysis.modules.length}`,
+    `Local dependencies: ${graph.edges.length}`,
+    `Unresolved local imports: ${analysis.unresolvedImports.length}`
+].join('\n');
+
+const importAnalysisAction =
+    await vscode.window.showInformationMessage(
+        'DevLens: Import analysis completed.',
+        'Show Summary'
+    );
+
+if (importAnalysisAction === 'Show Summary') {
+    vscode.window.showInformationMessage(message, {
+        modal: true
+    });
+}
+
+console.log('[DevLens] Import/export analysis:', analysis);
+console.log('[DevLens] Dependency graph:', graph);
+
                     }
                 );
             } catch (error) {
@@ -82,6 +112,51 @@ export function activate(context: vscode.ExtensionContext) {
     );
 
     context.subscriptions.push(analyzeProject);
+const visualizeArchitecture = vscode.commands.registerCommand(
+    'devlens.visualizeArchitecture',
+    async () => {
+        const workspace = vscode.workspace.workspaceFolders?.[0];
+
+        if (!workspace) {
+            vscode.window.showWarningMessage(
+                'DevLens: Open a project folder first.'
+            );
+            return;
+        }
+
+        try {
+            await vscode.window.withProgress(
+                {
+                    location: vscode.ProgressLocation.Notification,
+                    title: 'DevLens: Building architecture map...',
+                    cancellable: false
+                },
+                async () => {
+                    const project = await scanProject(workspace.uri);
+
+                    const analysis = await analyzeImportsAndExports(
+                        workspace.uri,
+                        project.files.map(file => file.relativePath)
+                    );
+
+                    const graph = buildDependencyGraph(analysis);
+
+                    showArchitecturePanel(graph, workspace.uri);
+                }
+            );
+        } catch (error) {
+            const details = error instanceof Error
+                ? error.message
+                : String(error);
+
+            vscode.window.showErrorMessage(
+                `DevLens architecture failed: ${details}`
+            );
+        }
+    }
+);
+
+context.subscriptions.push(visualizeArchitecture);
 }
 
 export function deactivate() {}
