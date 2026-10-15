@@ -21,6 +21,10 @@
         {
             "command": "devlens.visualizeArchitecture",
             "title": "DevLens: Visualize Architecture"
+        },
+        {
+            "command": "devlens.exploreRelationships",
+            "title": "DevLens: Explore Code Relationships"
         }
     ],
     "viewsContainers": {

@@ -5,6 +5,11 @@ import { scanProject } from './scanner/projectScanner';
 import { showArchitecturePanel } from './providers/architecturePanel';
 import { ProjectTreeProvider } from './providers/projectTreeProvider';
 import { analyzeAst } from './analyzer/astAnalyzer';
+import {
+    buildRelationshipGraph,
+    getSymbolRelationships
+} from './graph/relationshipEngine';
+import { showRelationshipPanel } from './providers/relationshipPanel';
 
 export function activate(context: vscode.ExtensionContext) {
     const projectTreeProvider = new ProjectTreeProvider();
@@ -208,6 +213,69 @@ const visualizeArchitecture = vscode.commands.registerCommand(
 );
 
 context.subscriptions.push(visualizeArchitecture);
+
+const exploreRelationships = vscode.commands.registerCommand(
+    'devlens.exploreRelationships',
+    async () => {
+        const workspace = vscode.workspace.workspaceFolders?.[0];
+        if (!workspace) {
+            vscode.window.showWarningMessage('DevLens: Open a project folder first.');
+            return;
+        }
+
+        try {
+            await vscode.window.withProgress(
+                {
+                    location: vscode.ProgressLocation.Notification,
+                    title: 'DevLens: Building code relationships...',
+                    cancellable: false
+                },
+                async () => {
+                    const project = await scanProject(workspace.uri);
+                    const filePaths = project.files.map(file => file.relativePath);
+                    const [imports, ast] = await Promise.all([
+                        analyzeImportsAndExports(workspace.uri, filePaths),
+                        analyzeAst(workspace.uri, filePaths)
+                    ]);
+                    const dependencyGraph = buildDependencyGraph(imports, filePaths);
+                    const relationshipGraph = buildRelationshipGraph(ast, dependencyGraph);
+
+                    if (!relationshipGraph.symbols.length) {
+                        vscode.window.showInformationMessage(
+                            'DevLens: No JavaScript or TypeScript symbols were found.'
+                        );
+                        return;
+                    }
+
+                    const choice = await vscode.window.showQuickPick(
+                        relationshipGraph.symbols.map(symbol => ({
+                            label: symbol.name,
+                            description: `${symbol.kind} · ${symbol.filePath}:${symbol.line}`,
+                            detail: symbol.isExported ? 'Exported symbol' : undefined,
+                            symbolId: symbol.id
+                        })),
+                        {
+                            title: 'DevLens: Explore Code Relationships',
+                            placeHolder: 'Select a function, class, method, or variable'
+                        }
+                    );
+                    if (!choice) return;
+
+                    const relationships = getSymbolRelationships(
+                        relationshipGraph,
+                        choice.symbolId
+                    );
+                    if (relationships) showRelationshipPanel(relationships, workspace.uri);
+                }
+            );
+        } catch (error) {
+            const details = error instanceof Error ? error.message : String(error);
+            vscode.window.showErrorMessage(`DevLens relationship analysis failed: ${details}`);
+        }
+    }
+);
+
+context.subscriptions.push(exploreRelationships);
 }
 
 export function deactivate() {}

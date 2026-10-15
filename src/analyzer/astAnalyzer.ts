@@ -16,6 +16,7 @@ export interface CodeSymbolInfo {
 export interface CodeCallInfo {
     name: string;
     line: number;
+    containingSymbol?: string;
 }
 
 export interface AstModuleInfo {
@@ -130,7 +131,7 @@ export async function analyzeAst(
             });
         };
 
-        function visit(node: ts.Node): void {
+        function visit(node: ts.Node, containingSymbol?: string): void {
             if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
                 module.imports.push(node.moduleSpecifier.text);
             } else if (ts.isImportEqualsDeclaration(node)) {
@@ -149,11 +150,14 @@ export async function analyzeAst(
                 module.exports.push('default');
             }
 
+            let childContainingSymbol = containingSymbol;
+
             if (ts.isFunctionDeclaration(node)) {
                 const exported = isExported(node);
                 const name = node.name?.text ?? '<anonymous>';
                 addSymbol(node, name, 'function', node.parameters, node.body, exported);
                 if (exported) module.exports.push(name);
+                childContainingSymbol = name;
             } else if (ts.isClassDeclaration(node)) {
                 const exported = isExported(node);
                 const name = node.name?.text ?? '<anonymous>';
@@ -162,6 +166,7 @@ export async function analyzeAst(
             } else if (ts.isMethodDeclaration(node) || ts.isMethodSignature(node)) {
                 const name = getPropertyName(node.name) ?? '<computed>';
                 addSymbol(node, name, 'method', node.parameters, 'body' in node ? node.body : undefined, isExported(node));
+                childContainingSymbol = name;
             } else if (ts.isVariableDeclaration(node)) {
                 const statement = node.parent.parent;
                 const exported = ts.isVariableStatement(statement) && isExported(statement);
@@ -170,15 +175,16 @@ export async function analyzeAst(
                     if (exported) module.exports.push(name);
                     if (node.initializer && (ts.isArrowFunction(node.initializer) || ts.isFunctionExpression(node.initializer))) {
                         addSymbol(node, name, 'function', node.initializer.parameters, node.initializer.body, exported);
+                        childContainingSymbol = name;
                     }
                 }
             }
 
             if (ts.isCallExpression(node)) {
                 const name = node.expression.getText(sourceFile);
-                module.calls.push({ name, line: lineOf(node) });
+                module.calls.push({ name, line: lineOf(node), containingSymbol });
             }
-            ts.forEachChild(node, visit);
+            ts.forEachChild(node, child => visit(child, childContainingSymbol));
         }
 
         visit(sourceFile);

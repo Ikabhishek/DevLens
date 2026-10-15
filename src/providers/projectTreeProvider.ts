@@ -73,6 +73,18 @@ export class ProjectTreeProvider
             title: 'Visualize Architecture'
         };
 
+        const relationshipsItem = new vscode.TreeItem(
+            'Explore Code Relationships',
+            vscode.TreeItemCollapsibleState.None
+        );
+
+        relationshipsItem.iconPath = new vscode.ThemeIcon('references');
+        relationshipsItem.description = 'Find callers and dependencies';
+        relationshipsItem.command = {
+            command: 'devlens.exploreRelationships',
+            title: 'Explore Code Relationships'
+        };
+
         const refreshItem = new vscode.TreeItem(
             'Refresh Dashboard',
             vscode.TreeItemCollapsibleState.None
@@ -90,6 +102,7 @@ export class ProjectTreeProvider
             projectItem,
             analyzeItem,
             architectureItem,
+            relationshipsItem,
             refreshItem
         ];
     }
