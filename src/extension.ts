@@ -10,6 +10,10 @@ import {
     getSymbolRelationships
 } from './graph/relationshipEngine';
 import { showRelationshipPanel } from './providers/relationshipPanel';
+import { analyzeImpact } from './graph/impactAnalyzer';
+import { showImpactPanel } from './providers/impactPanel';
+import { detectArchitecture } from './analyzer/architectureAnalyzer';
+import { showArchitectureDetectionPanel } from './providers/architectureDetectionPanel';
 
 export function activate(context: vscode.ExtensionContext) {
     const projectTreeProvider = new ProjectTreeProvider();
@@ -197,7 +201,8 @@ const visualizeArchitecture = vscode.commands.registerCommand(
     project.files.map(file => file.relativePath)
 );
 
-                    showArchitecturePanel(graph, workspace.uri);
+                    const architecture = await detectArchitecture(workspace.uri, project);
+                    showArchitecturePanel(graph, workspace.uri, architecture);
                 }
             );
         } catch (error) {
@@ -373,6 +378,125 @@ const explainCode = vscode.commands.registerCommand(
 );
 
 context.subscriptions.push(explainCode);
+
+const analyzeImpactCommand = vscode.commands.registerCommand(
+    'devlens.analyzeImpact',
+    async () => {
+        const workspace = vscode.workspace.workspaceFolders?.[0];
+        if (!workspace) {
+            vscode.window.showWarningMessage('DevLens: Open a project folder first.');
+            return;
+        }
+
+        const editor = vscode.window.activeTextEditor;
+        const selectedText = editor?.document.getText(editor.selection).trim() ?? '';
+        const wordRange = editor && !selectedText
+            ? editor.document.getWordRangeAtPosition(editor.selection.active)
+            : undefined;
+        const symbolName = selectedText || (editor && wordRange
+            ? editor.document.getText(wordRange)
+            : '');
+        const activeFile = editor
+            ? vscode.workspace.asRelativePath(editor.document.uri, false).replace(/\\/g, '/')
+            : undefined;
+
+        try {
+            await vscode.window.withProgress(
+                {
+                    location: vscode.ProgressLocation.Notification,
+                    title: 'DevLens: Calculating impact...',
+                    cancellable: false
+                },
+                async () => {
+                    const project = await scanProject(workspace.uri);
+                    const filePaths = project.files.map(file => file.relativePath);
+                    const [imports, ast] = await Promise.all([
+                        analyzeImportsAndExports(workspace.uri, filePaths),
+                        analyzeAst(workspace.uri, filePaths)
+                    ]);
+                    const relationshipGraph = buildRelationshipGraph(
+                        ast,
+                        buildDependencyGraph(imports, filePaths)
+                    );
+                    const hasSelectedName = /^[A-Za-z_$][\w$]*$/.test(symbolName);
+                    const candidates = relationshipGraph.symbols
+                        .filter(symbol => !hasSelectedName || symbol.name === symbolName)
+                        .sort((a, b) => {
+                            const aCurrentFile = a.filePath === activeFile ? -1 : 0;
+                            const bCurrentFile = b.filePath === activeFile ? -1 : 0;
+                            return aCurrentFile - bCurrentFile || a.filePath.localeCompare(b.filePath);
+                        });
+                    if (!candidates.length) {
+                        vscode.window.showInformationMessage(
+                            `DevLens: No analyzed symbol named "${symbolName}" was found.`
+                        );
+                        return;
+                    }
+
+                    let symbolId: string | undefined;
+                    if (candidates.length === 1) {
+                        symbolId = candidates[0].id;
+                    } else {
+                        const choice = await vscode.window.showQuickPick(
+                            candidates.map(symbol => ({
+                                label: symbol.name,
+                                description: `${symbol.kind} · ${symbol.filePath}:${symbol.line}`,
+                                symbolId: symbol.id
+                            })),
+                            {
+                                title: 'DevLens: Analyze Impact',
+                                placeHolder: hasSelectedName
+                                    ? `Choose the ${symbolName} symbol to analyze`
+                                    : 'Select a function, class, method, or variable'
+                            }
+                        );
+                        symbolId = choice?.symbolId;
+                    }
+                    if (!symbolId) return;
+
+                    const impact = analyzeImpact(relationshipGraph, symbolId);
+                    if (impact) showImpactPanel(impact, workspace.uri);
+                }
+            );
+        } catch (error) {
+            const details = error instanceof Error ? error.message : String(error);
+            vscode.window.showErrorMessage(`DevLens impact analysis failed: ${details}`);
+        }
+    }
+);
+
+context.subscriptions.push(analyzeImpactCommand);
+
+const detectArchitectureCommand = vscode.commands.registerCommand(
+    'devlens.detectArchitecture',
+    async () => {
+        const workspace = vscode.workspace.workspaceFolders?.[0];
+        if (!workspace) {
+            vscode.window.showWarningMessage('DevLens: Open a project folder first.');
+            return;
+        }
+
+        try {
+            await vscode.window.withProgress(
+                {
+                    location: vscode.ProgressLocation.Notification,
+                    title: 'DevLens: Detecting architecture...',
+                    cancellable: false
+                },
+                async () => {
+                    const project = await scanProject(workspace.uri);
+                    const architecture = await detectArchitecture(workspace.uri, project);
+                    showArchitectureDetectionPanel(architecture);
+                }
+            );
+        } catch (error) {
+            const details = error instanceof Error ? error.message : String(error);
+            vscode.window.showErrorMessage(`DevLens architecture detection failed: ${details}`);
+        }
+    }
+);
+
+context.subscriptions.push(detectArchitectureCommand);
 }
 
 export function deactivate() {}

@@ -97,6 +97,30 @@ export class ProjectTreeProvider
             title: 'Why Is This Code Here?'
         };
 
+        const impactItem = new vscode.TreeItem(
+            'Analyze Impact',
+            vscode.TreeItemCollapsibleState.None
+        );
+
+        impactItem.iconPath = new vscode.ThemeIcon('warning');
+        impactItem.description = 'Identify affected files';
+        impactItem.command = {
+            command: 'devlens.analyzeImpact',
+            title: 'Analyze Impact'
+        };
+
+        const detectArchitectureItem = new vscode.TreeItem(
+            'Detect Architecture',
+            vscode.TreeItemCollapsibleState.None
+        );
+
+        detectArchitectureItem.iconPath = new vscode.ThemeIcon('symbol-structure');
+        detectArchitectureItem.description = 'Identify project technologies';
+        detectArchitectureItem.command = {
+            command: 'devlens.detectArchitecture',
+            title: 'Detect Architecture'
+        };
+
         const refreshItem = new vscode.TreeItem(
             'Refresh Dashboard',
             vscode.TreeItemCollapsibleState.None
@@ -116,6 +140,8 @@ export class ProjectTreeProvider
             architectureItem,
             relationshipsItem,
             explainCodeItem,
+            impactItem,
+            detectArchitectureItem,
             refreshItem
         ];
     }

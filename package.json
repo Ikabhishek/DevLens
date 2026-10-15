@@ -29,6 +29,14 @@
         {
             "command": "devlens.explainCode",
             "title": "DevLens: Why Is This Code Here?"
+        },
+        {
+            "command": "devlens.analyzeImpact",
+            "title": "DevLens: Analyze Impact"
+        },
+        {
+            "command": "devlens.detectArchitecture",
+            "title": "DevLens: Detect Architecture"
         }
     ],
     "viewsContainers": {
@@ -54,6 +62,11 @@
             {
                 "command": "devlens.explainCode",
                 "group": "navigation@100",
+                "when": "editorTextFocus"
+            },
+            {
+                "command": "devlens.analyzeImpact",
+                "group": "navigation@101",
                 "when": "editorTextFocus"
             }
         ]
