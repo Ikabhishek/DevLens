@@ -8,7 +8,7 @@ export function showRelationshipPanel(
 ): void {
     const panel = vscode.window.createWebviewPanel(
         'devlensRelationships',
-        `DevLens: ${relationships.symbol.name}`,
+        `Why Is This Code Here? ${relationships.symbol.name}`,
         vscode.ViewColumn.One,
         { enableScripts: true, localResourceRoots: [] }
     );
@@ -53,6 +53,9 @@ function getWebviewContent(relationships: SymbolRelationships): string {
     const dependencies = relationships.localDependencies.map(dependency =>
         openButton(dependency.filePath, dependency.line, `${dependency.name} (${dependency.filePath}:${dependency.line})`)
     );
+    const role = symbol.isExported
+        ? `This exported ${symbol.kind} is available to other files in the project.`
+        : `This ${symbol.kind} is currently scoped to ${symbol.filePath}.`;
 
     return `<!DOCTYPE html>
 <html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -64,8 +67,10 @@ h1 { margin: 0 0 5px; } h2 { font-size: 15px; margin: 0 0 10px; }
 .meta, .muted { color: var(--vscode-descriptionForeground); } .link { border: 0; padding: 0; background: transparent; color: var(--vscode-textLink-foreground); cursor: pointer; text-align: left; font: inherit; }
 .link:hover { text-decoration: underline; } li { margin: 8px 0; overflow-wrap: anywhere; }
 </style></head><body>
-<h1>${escapeHtml(symbol.name)}</h1>
+<h1>Why Is This Code Here?</h1>
+<h2>${escapeHtml(symbol.name)}</h2>
 <p class="meta">${escapeHtml(symbol.kind)} · ${escapeHtml(symbol.filePath)}:${symbol.line}${symbol.isExported ? ' · exported' : ''}</p>
+<section class="card"><h2>Project role</h2><p>${escapeHtml(role)}</p></section>
 <section class="card"><h2>Defined in</h2>${openButton(symbol.filePath, symbol.line, `${symbol.filePath}:${symbol.line}`)}</section>
 <section class="card"><h2>Called by</h2>${list(callers, 'No resolved callers found.')}</section>
 <section class="card"><h2>Depends on</h2>${list(dependencies, 'No resolved symbol calls were found in this symbol.')}</section>

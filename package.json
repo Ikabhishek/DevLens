@@ -25,6 +25,10 @@
         {
             "command": "devlens.exploreRelationships",
             "title": "DevLens: Explore Code Relationships"
+        },
+        {
+            "command": "devlens.explainCode",
+            "title": "DevLens: Why Is This Code Here?"
         }
     ],
     "viewsContainers": {
@@ -42,6 +46,15 @@
                 "id": "devlens.projectView",
                 "name": "Project",
                 "icon": "resources/devlens.svg"
+            }
+        ]
+    },
+    "menus": {
+        "editor/context": [
+            {
+                "command": "devlens.explainCode",
+                "group": "navigation@100",
+                "when": "editorTextFocus"
             }
         ]
     }

@@ -85,6 +85,18 @@ export class ProjectTreeProvider
             title: 'Explore Code Relationships'
         };
 
+        const explainCodeItem = new vscode.TreeItem(
+            'Why Is This Code Here?',
+            vscode.TreeItemCollapsibleState.None
+        );
+
+        explainCodeItem.iconPath = new vscode.ThemeIcon('question');
+        explainCodeItem.description = 'Explain a selected symbol';
+        explainCodeItem.command = {
+            command: 'devlens.explainCode',
+            title: 'Why Is This Code Here?'
+        };
+
         const refreshItem = new vscode.TreeItem(
             'Refresh Dashboard',
             vscode.TreeItemCollapsibleState.None
@@ -103,6 +115,7 @@ export class ProjectTreeProvider
             analyzeItem,
             architectureItem,
             relationshipsItem,
+            explainCodeItem,
             refreshItem
         ];
     }

@@ -276,6 +276,103 @@ const exploreRelationships = vscode.commands.registerCommand(
 );
 
 context.subscriptions.push(exploreRelationships);
+
+const explainCode = vscode.commands.registerCommand(
+    'devlens.explainCode',
+    async () => {
+        const workspace = vscode.workspace.workspaceFolders?.[0];
+        const editor = vscode.window.activeTextEditor;
+        if (!workspace) {
+            vscode.window.showWarningMessage('DevLens: Open a project folder first.');
+            return;
+        }
+        if (!editor) {
+            vscode.window.showInformationMessage(
+                'DevLens: Open a JavaScript or TypeScript file and select a symbol.'
+            );
+            return;
+        }
+
+        const selectedText = editor.document.getText(editor.selection).trim();
+        const wordRange = selectedText
+            ? undefined
+            : editor.document.getWordRangeAtPosition(editor.selection.active);
+        const symbolName = selectedText || (wordRange
+            ? editor.document.getText(wordRange)
+            : '');
+        if (!/^[A-Za-z_$][\w$]*$/.test(symbolName)) {
+            vscode.window.showInformationMessage(
+                'DevLens: Select a single function, class, method, or variable name.'
+            );
+            return;
+        }
+
+        try {
+            await vscode.window.withProgress(
+                {
+                    location: vscode.ProgressLocation.Notification,
+                    title: `DevLens: Explaining ${symbolName}...`,
+                    cancellable: false
+                },
+                async () => {
+                    const project = await scanProject(workspace.uri);
+                    const filePaths = project.files.map(file => file.relativePath);
+                    const [imports, ast] = await Promise.all([
+                        analyzeImportsAndExports(workspace.uri, filePaths),
+                        analyzeAst(workspace.uri, filePaths)
+                    ]);
+                    const dependencyGraph = buildDependencyGraph(imports, filePaths);
+                    const relationshipGraph = buildRelationshipGraph(ast, dependencyGraph);
+                    const activeFile = vscode.workspace.asRelativePath(editor.document.uri, false)
+                        .replace(/\\/g, '/');
+                    const matches = relationshipGraph.symbols.filter(symbol =>
+                        symbol.name === symbolName
+                    ).sort((a, b) => {
+                        const aCurrentFile = a.filePath === activeFile ? -1 : 0;
+                        const bCurrentFile = b.filePath === activeFile ? -1 : 0;
+                        return aCurrentFile - bCurrentFile || a.filePath.localeCompare(b.filePath);
+                    });
+
+                    if (!matches.length) {
+                        vscode.window.showInformationMessage(
+                            `DevLens: No analyzed symbol named "${symbolName}" was found.`
+                        );
+                        return;
+                    }
+
+                    const selectedSymbol = matches.length === 1
+                        ? matches[0]
+                        : await vscode.window.showQuickPick(
+                            matches.map(symbol => ({
+                                label: symbol.name,
+                                description: `${symbol.kind} · ${symbol.filePath}:${symbol.line}`,
+                                symbolId: symbol.id
+                            })),
+                            {
+                                title: `Why Is This Code Here? ${symbolName}`,
+                                placeHolder: 'Choose the symbol to explain'
+                            }
+                        );
+                    if (!selectedSymbol) return;
+
+                    const symbolId = 'symbolId' in selectedSymbol
+                        ? selectedSymbol.symbolId
+                        : selectedSymbol.id;
+                    const relationships = getSymbolRelationships(
+                        relationshipGraph,
+                        symbolId
+                    );
+                    if (relationships) showRelationshipPanel(relationships, workspace.uri);
+                }
+            );
+        } catch (error) {
+            const details = error instanceof Error ? error.message : String(error);
+            vscode.window.showErrorMessage(`DevLens explanation failed: ${details}`);
+        }
+    }
+);
+
+context.subscriptions.push(explainCode);
 }
 
 export function deactivate() {}
