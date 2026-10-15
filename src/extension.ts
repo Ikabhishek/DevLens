@@ -4,6 +4,7 @@ import * as vscode from 'vscode';
 import { scanProject } from './scanner/projectScanner';
 import { showArchitecturePanel } from './providers/architecturePanel';
 import { ProjectTreeProvider } from './providers/projectTreeProvider';
+import { analyzeAst } from './analyzer/astAnalyzer';
 
 export function activate(context: vscode.ExtensionContext) {
     const projectTreeProvider = new ProjectTreeProvider();
@@ -98,6 +99,30 @@ const graph = buildDependencyGraph(
     project.files.map(file => file.relativePath)
 );
 
+const ast = await analyzeAst(
+    workspace.uri,
+    project.files.map(file => file.relativePath)
+);
+
+const astSummary = [
+    `Functions: ${ast.totals.functions}`,
+    `Classes: ${ast.totals.classes}`,
+    `Methods: ${ast.totals.methods}`,
+    `Variables: ${ast.totals.variables}`,
+    `Function calls: ${ast.totals.calls}`,
+    `Imports: ${ast.totals.imports}`,
+    `Exports: ${ast.totals.exports}`
+].join('\n');
+
+const astAction = await vscode.window.showInformationMessage(
+    'DevLens: AST analysis completed.',
+    'Show Summary'
+);
+
+if (astAction === 'Show Summary') {
+    vscode.window.showInformationMessage(astSummary, { modal: true });
+}
+
 const message = [
     `Files analyzed: ${analysis.modules.length}`,
     `Local dependencies: ${graph.edges.length}`,
@@ -118,6 +143,7 @@ if (importAnalysisAction === 'Show Summary') {
 
 console.log('[DevLens] Import/export analysis:', analysis);
 console.log('[DevLens] Dependency graph:', graph);
+console.log('[DevLens] AST analysis:', ast);
 
                     }
                 );
