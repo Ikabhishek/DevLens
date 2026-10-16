@@ -121,6 +121,18 @@ export class ProjectTreeProvider
             title: 'Detect Architecture'
         };
 
+        const traceFlowItem = new vscode.TreeItem(
+            'Trace Flow',
+            vscode.TreeItemCollapsibleState.None
+        );
+
+        traceFlowItem.iconPath = new vscode.ThemeIcon('debug-step-over');
+        traceFlowItem.description = 'Follow downstream code flow';
+        traceFlowItem.command = {
+            command: 'devlens.traceFlow',
+            title: 'Trace Flow'
+        };
+
         const refreshItem = new vscode.TreeItem(
             'Refresh Dashboard',
             vscode.TreeItemCollapsibleState.None
@@ -142,6 +154,7 @@ export class ProjectTreeProvider
             explainCodeItem,
             impactItem,
             detectArchitectureItem,
+            traceFlowItem,
             refreshItem
         ];
     }

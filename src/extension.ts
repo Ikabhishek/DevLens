@@ -14,6 +14,9 @@ import { analyzeImpact } from './graph/impactAnalyzer';
 import { showImpactPanel } from './providers/impactPanel';
 import { detectArchitecture } from './analyzer/architectureAnalyzer';
 import { showArchitectureDetectionPanel } from './providers/architectureDetectionPanel';
+import { traceFlow } from './graph/flowAnalyzer';
+import { showFlowPanel } from './providers/flowPanel';
+import { analyzeHttp } from './analyzer/httpAnalyzer';
 
 export function activate(context: vscode.ExtensionContext) {
     const projectTreeProvider = new ProjectTreeProvider();
@@ -497,6 +500,95 @@ const detectArchitectureCommand = vscode.commands.registerCommand(
 );
 
 context.subscriptions.push(detectArchitectureCommand);
+
+const traceFlowCommand = vscode.commands.registerCommand(
+    'devlens.traceFlow',
+    async () => {
+        const workspace = vscode.workspace.workspaceFolders?.[0];
+        if (!workspace) {
+            vscode.window.showWarningMessage('DevLens: Open a project folder first.');
+            return;
+        }
+
+        const editor = vscode.window.activeTextEditor;
+        const selectedText = editor?.document.getText(editor.selection).trim() ?? '';
+        const wordRange = editor && !selectedText
+            ? editor.document.getWordRangeAtPosition(editor.selection.active)
+            : undefined;
+        const symbolName = selectedText || (editor && wordRange
+            ? editor.document.getText(wordRange)
+            : '');
+        const activeFile = editor
+            ? vscode.workspace.asRelativePath(editor.document.uri, false).replace(/\\/g, '/')
+            : undefined;
+
+        try {
+            await vscode.window.withProgress(
+                {
+                    location: vscode.ProgressLocation.Notification,
+                    title: 'DevLens: Tracing code flow...',
+                    cancellable: false
+                },
+                async () => {
+                    const project = await scanProject(workspace.uri);
+                    const filePaths = project.files.map(file => file.relativePath);
+                    const [imports, ast, http] = await Promise.all([
+                        analyzeImportsAndExports(workspace.uri, filePaths),
+                        analyzeAst(workspace.uri, filePaths),
+                        analyzeHttp(workspace.uri, filePaths)
+                    ]);
+                    const relationshipGraph = buildRelationshipGraph(
+                        ast,
+                        buildDependencyGraph(imports, filePaths)
+                    );
+                    const hasSelectedName = /^[A-Za-z_$][\w$]*$/.test(symbolName);
+                    const candidates = relationshipGraph.symbols
+                        .filter(symbol => !hasSelectedName || symbol.name === symbolName)
+                        .sort((a, b) => {
+                            const aCurrentFile = a.filePath === activeFile ? -1 : 0;
+                            const bCurrentFile = b.filePath === activeFile ? -1 : 0;
+                            return aCurrentFile - bCurrentFile || a.filePath.localeCompare(b.filePath);
+                        });
+                    if (!candidates.length) {
+                        vscode.window.showInformationMessage(
+                            `DevLens: No analyzed symbol named "${symbolName}" was found.`
+                        );
+                        return;
+                    }
+
+                    let symbolId: string | undefined;
+                    if (candidates.length === 1) {
+                        symbolId = candidates[0].id;
+                    } else {
+                        const choice = await vscode.window.showQuickPick(
+                            candidates.map(symbol => ({
+                                label: symbol.name,
+                                description: `${symbol.kind} · ${symbol.filePath}:${symbol.line}`,
+                                symbolId: symbol.id
+                            })),
+                            {
+                                title: 'DevLens: Trace Flow',
+                                placeHolder: hasSelectedName
+                                    ? `Choose the ${symbolName} symbol to trace`
+                                    : 'Select a function, class, method, or variable'
+                            }
+                        );
+                        symbolId = choice?.symbolId;
+                    }
+                    if (!symbolId) return;
+
+                    const trace = traceFlow(relationshipGraph, symbolId, http);
+                    if (trace) showFlowPanel(trace, workspace.uri);
+                }
+            );
+        } catch (error) {
+            const details = error instanceof Error ? error.message : String(error);
+            vscode.window.showErrorMessage(`DevLens flow trace failed: ${details}`);
+        }
+    }
+);
+
+context.subscriptions.push(traceFlowCommand);
 }
 
 export function deactivate() {}

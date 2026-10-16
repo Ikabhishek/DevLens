@@ -184,6 +184,10 @@ export async function analyzeAst(
                 const name = node.expression.getText(sourceFile);
                 module.calls.push({ name, line: lineOf(node), containingSymbol });
             }
+            if (ts.isJsxSelfClosingElement(node) || ts.isJsxOpeningElement(node)) {
+                const name = node.tagName.getText(sourceFile);
+                module.calls.push({ name, line: lineOf(node), containingSymbol });
+            }
             ts.forEachChild(node, child => visit(child, childContainingSymbol));
         }
 

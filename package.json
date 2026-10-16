@@ -37,6 +37,10 @@
         {
             "command": "devlens.detectArchitecture",
             "title": "DevLens: Detect Architecture"
+        },
+        {
+            "command": "devlens.traceFlow",
+            "title": "DevLens: Trace Flow"
         }
     ],
     "viewsContainers": {
@@ -67,6 +71,11 @@
             {
                 "command": "devlens.analyzeImpact",
                 "group": "navigation@101",
+                "when": "editorTextFocus"
+            },
+            {
+                "command": "devlens.traceFlow",
+                "group": "navigation@102",
                 "when": "editorTextFocus"
             }
         ]

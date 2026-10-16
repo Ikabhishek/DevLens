@@ -37,6 +37,11 @@ function callRoot(expression: string): string | undefined {
     return match?.[1];
 }
 
+function callMember(expression: string): string | undefined {
+    const match = expression.match(/^[A-Za-z_$][\w$]*\.([A-Za-z_$][\w$]*)/);
+    return match?.[1];
+}
+
 export function buildRelationshipGraph(
     ast: AstAnalysis,
     dependencyGraph: DependencyGraph
@@ -61,14 +66,17 @@ export function buildRelationshipGraph(
         for (const call of module.calls) {
             const root = callRoot(call.name);
             if (!root) continue;
+            const member = callMember(call.name);
 
             const localTarget = (symbolsByFile.get(module.filePath) ?? []).find(symbol =>
                 symbol.name === root && (symbol.kind === 'function' || symbol.kind === 'method')
             );
-            const importedTarget = outgoingEdges
+            const importedCandidates = outgoingEdges
                 .filter(edge => edge.importedNames.includes(root) || edge.importedNames.includes('*'))
-                .flatMap(edge => symbolsByFile.get(edge.to) ?? [])
-                .find(symbol => symbol.name === root || symbol.isExported);
+                .flatMap(edge => symbolsByFile.get(edge.to) ?? []);
+            const importedTarget = member
+                ? importedCandidates.find(symbol => symbol.name === member)
+                : importedCandidates.find(symbol => symbol.name === root || symbol.isExported);
 
             calls.push({
                 callerFile: module.filePath,
