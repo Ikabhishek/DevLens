@@ -176,7 +176,12 @@ const astSummary = [
     `Variables: ${ast.totals.variables}`,
     `Function calls: ${ast.totals.calls}`,
     `Imports: ${ast.totals.imports}`,
-    `Exports: ${ast.totals.exports}`
+    `Exports: ${ast.totals.exports}`,
+    `Angular components: ${ast.totals.angularComponents}`,
+    `Angular services: ${ast.totals.angularServices}`,
+    `Angular routes: ${ast.totals.angularRoutes}`,
+    `Express controllers: ${ast.totals.expressControllers}`,
+    `Mongoose models: ${ast.totals.mongooseModels}`
 ].join('\n');
 
 const astAction = await vscode.window.showInformationMessage(

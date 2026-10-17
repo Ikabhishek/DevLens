@@ -72,6 +72,10 @@ function functionName(node: ts.Node): string | undefined {
         (ts.isArrowFunction(node.initializer) || ts.isFunctionExpression(node.initializer))) {
         return node.name.text;
     }
+    if (ts.isPropertyAssignment(node) && ts.isIdentifier(node.name) &&
+        (ts.isArrowFunction(node.initializer) || ts.isFunctionExpression(node.initializer))) {
+        return node.name.text;
+    }
     return undefined;
 }
 

@@ -99,7 +99,7 @@ function getWebviewContent(
 
     const relevantFilesFor = (component: ArchitectureComponent): string[] => {
         const patterns: Record<ArchitectureComponent['category'], RegExp> = {
-            frontend: /(^src\/|\.(tsx|jsx)$|\/components?\/)/i,
+            frontend: /(^src\/|\.(tsx|jsx)$|\/components?\/|\.component\.ts$)/i,
             backend: /(server|api|route|controller|service)/i,
             database: /(database|\bdb\b|model|schema|prisma)/i,
             'build-tool': /(vite\.config|webpack|package\.json)/i,

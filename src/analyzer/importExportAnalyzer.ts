@@ -57,6 +57,7 @@ function getImportNames(node: ts.ImportDeclaration): string[] {
     const names: string[] = [];
 
     if (clause.name) {
+        names.push(clause.name.text);
         names.push('default');
     }
 

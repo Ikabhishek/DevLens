@@ -3,6 +3,12 @@ import * as ts from 'typescript';
 import * as vscode from 'vscode';
 
 export type CodeSymbolKind = 'function' | 'class' | 'method' | 'variable';
+export type FrameworkRole =
+    | 'angular-component'
+    | 'angular-service'
+    | 'angular-module'
+    | 'express-controller'
+    | 'mongoose-model';
 
 export interface CodeSymbolInfo {
     name: string;
@@ -11,12 +17,28 @@ export interface CodeSymbolInfo {
     parameters: string[];
     returnExpression?: string;
     isExported: boolean;
+    frameworkRole?: FrameworkRole;
 }
 
 export interface CodeCallInfo {
     name: string;
     line: number;
     containingSymbol?: string;
+    containingClass?: string;
+}
+
+export interface InjectedDependency {
+    ownerClass: string;
+    propertyName: string;
+    typeName: string;
+    line: number;
+}
+
+export interface FrameworkRoute {
+    framework: 'angular';
+    path: string;
+    componentName: string;
+    line: number;
 }
 
 export interface AstModuleInfo {
@@ -25,6 +47,8 @@ export interface AstModuleInfo {
     calls: CodeCallInfo[];
     imports: string[];
     exports: string[];
+    injectedDependencies: InjectedDependency[];
+    frameworkRoutes: FrameworkRoute[];
 }
 
 export interface AstAnalysis {
@@ -37,6 +61,11 @@ export interface AstAnalysis {
         calls: number;
         imports: number;
         exports: number;
+        angularComponents: number;
+        angularServices: number;
+        angularRoutes: number;
+        expressControllers: number;
+        mongooseModels: number;
     };
 }
 
@@ -64,6 +93,32 @@ function getPropertyName(name: ts.PropertyName | undefined): string | undefined 
         return name.text;
     }
     return name.getText();
+}
+
+function decoratorNames(node: ts.Node, sourceFile: ts.SourceFile): string[] {
+    if (!ts.canHaveDecorators(node)) return [];
+    return (ts.getDecorators(node) ?? []).map(decorator => {
+        const expression = ts.isCallExpression(decorator.expression)
+            ? decorator.expression.expression
+            : decorator.expression;
+        return expression.getText(sourceFile).split('.').pop() ?? '';
+    });
+}
+
+function classRole(node: ts.ClassDeclaration, sourceFile: ts.SourceFile): FrameworkRole | undefined {
+    const decorators = decoratorNames(node, sourceFile);
+    if (decorators.includes('Component')) return 'angular-component';
+    if (decorators.includes('Injectable')) return 'angular-service';
+    if (decorators.includes('NgModule')) return 'angular-module';
+    if (decorators.some(name => /Controller$/.test(name))) return 'express-controller';
+    return undefined;
+}
+
+function mongooseModel(node: ts.VariableDeclaration): boolean {
+    if (!node.initializer || !ts.isCallExpression(node.initializer)) return false;
+    const expression = node.initializer.expression;
+    return (ts.isIdentifier(expression) && expression.text === 'model') ||
+        (ts.isPropertyAccessExpression(expression) && expression.name.text === 'model');
 }
 
 export async function analyzeAst(
@@ -96,7 +151,9 @@ export async function analyzeAst(
             symbols: [],
             calls: [],
             imports: [],
-            exports: []
+            exports: [],
+            injectedDependencies: [],
+            frameworkRoutes: []
         };
 
         const lineOf = (node: ts.Node): number =>
@@ -112,7 +169,8 @@ export async function analyzeAst(
             kind: CodeSymbolKind,
             parameters: readonly ts.ParameterDeclaration[] = [],
             body?: ts.ConciseBody | ts.Block,
-            exported = false
+            exported = false,
+            frameworkRole?: FrameworkRole
         ): void => {
             let returnExpression: string | undefined;
             if (body && !ts.isBlock(body)) {
@@ -127,11 +185,12 @@ export async function analyzeAst(
                 line: lineOf(node),
                 parameters: parameters.flatMap(parameter => getBindingNames(parameter.name)),
                 returnExpression,
-                isExported: exported
+                isExported: exported,
+                frameworkRole
             });
         };
 
-        function visit(node: ts.Node, containingSymbol?: string): void {
+        function visit(node: ts.Node, containingSymbol?: string, containingClass?: string): void {
             if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
                 module.imports.push(node.moduleSpecifier.text);
             } else if (ts.isImportEqualsDeclaration(node)) {
@@ -151,6 +210,7 @@ export async function analyzeAst(
             }
 
             let childContainingSymbol = containingSymbol;
+            let childContainingClass = containingClass;
 
             if (ts.isFunctionDeclaration(node)) {
                 const exported = isExported(node);
@@ -161,34 +221,71 @@ export async function analyzeAst(
             } else if (ts.isClassDeclaration(node)) {
                 const exported = isExported(node);
                 const name = node.name?.text ?? '<anonymous>';
-                addSymbol(node, name, 'class', [], undefined, exported);
+                addSymbol(node, name, 'class', [], undefined, exported, classRole(node, sourceFile));
                 if (exported) module.exports.push(name);
+                childContainingClass = name;
             } else if (ts.isMethodDeclaration(node) || ts.isMethodSignature(node)) {
                 const name = getPropertyName(node.name) ?? '<computed>';
                 addSymbol(node, name, 'method', node.parameters, 'body' in node ? node.body : undefined, isExported(node));
                 childContainingSymbol = name;
+            } else if (ts.isConstructorDeclaration(node) && containingClass) {
+                for (const parameter of node.parameters) {
+                    if (!ts.isIdentifier(parameter.name) || !parameter.type) continue;
+                    const typeName = parameter.type.getText(sourceFile).replace(/<.*>$/, '').trim();
+                    if (!/^[A-Za-z_$][\w$]*$/.test(typeName)) continue;
+                    module.injectedDependencies.push({
+                        ownerClass: containingClass,
+                        propertyName: parameter.name.text,
+                        typeName,
+                        line: lineOf(parameter)
+                    });
+                }
             } else if (ts.isVariableDeclaration(node)) {
                 const statement = node.parent.parent;
                 const exported = ts.isVariableStatement(statement) && isExported(statement);
                 for (const name of getBindingNames(node.name)) {
-                    addSymbol(node, name, 'variable', [], undefined, exported);
+                    addSymbol(node, name, 'variable', [], undefined, exported,
+                        mongooseModel(node) ? 'mongoose-model' : undefined);
                     if (exported) module.exports.push(name);
                     if (node.initializer && (ts.isArrowFunction(node.initializer) || ts.isFunctionExpression(node.initializer))) {
                         addSymbol(node, name, 'function', node.initializer.parameters, node.initializer.body, exported);
                         childContainingSymbol = name;
                     }
                 }
+            } else if (ts.isPropertyAssignment(node) &&
+                (ts.isArrowFunction(node.initializer) || ts.isFunctionExpression(node.initializer))) {
+                const name = getPropertyName(node.name) ?? '<computed>';
+                addSymbol(node, name, 'method', node.initializer.parameters, node.initializer.body);
+                childContainingSymbol = name;
             }
 
             if (ts.isCallExpression(node)) {
                 const name = node.expression.getText(sourceFile);
-                module.calls.push({ name, line: lineOf(node), containingSymbol });
+                module.calls.push({ name, line: lineOf(node), containingSymbol, containingClass });
             }
             if (ts.isJsxSelfClosingElement(node) || ts.isJsxOpeningElement(node)) {
                 const name = node.tagName.getText(sourceFile);
-                module.calls.push({ name, line: lineOf(node), containingSymbol });
+                module.calls.push({ name, line: lineOf(node), containingSymbol, containingClass });
             }
-            ts.forEachChild(node, child => visit(child, childContainingSymbol));
+            if (ts.isObjectLiteralExpression(node)) {
+                const pathProperty = node.properties.find(property =>
+                    ts.isPropertyAssignment(property) && getPropertyName(property.name) === 'path'
+                ) as ts.PropertyAssignment | undefined;
+                const componentProperty = node.properties.find(property =>
+                    ts.isPropertyAssignment(property) && getPropertyName(property.name) === 'component'
+                ) as ts.PropertyAssignment | undefined;
+                if (pathProperty && componentProperty &&
+                    (ts.isStringLiteral(pathProperty.initializer) || ts.isNoSubstitutionTemplateLiteral(pathProperty.initializer)) &&
+                    ts.isIdentifier(componentProperty.initializer)) {
+                    module.frameworkRoutes.push({
+                        framework: 'angular',
+                        path: pathProperty.initializer.text,
+                        componentName: componentProperty.initializer.text,
+                        line: lineOf(node)
+                    });
+                }
+            }
+            ts.forEachChild(node, child => visit(child, childContainingSymbol, childContainingClass));
         }
 
         visit(sourceFile);
@@ -204,7 +301,16 @@ export async function analyzeAst(
             variables: modules.reduce((sum, module) => sum + module.symbols.filter(symbol => symbol.kind === 'variable').length, 0),
             calls: modules.reduce((sum, module) => sum + module.calls.length, 0),
             imports: modules.reduce((sum, module) => sum + module.imports.length, 0),
-            exports: modules.reduce((sum, module) => sum + module.exports.length, 0)
+            exports: modules.reduce((sum, module) => sum + module.exports.length, 0),
+            angularComponents: modules.reduce((sum, module) => sum + module.symbols
+                .filter(symbol => symbol.frameworkRole === 'angular-component').length, 0),
+            angularServices: modules.reduce((sum, module) => sum + module.symbols
+                .filter(symbol => symbol.frameworkRole === 'angular-service').length, 0),
+            angularRoutes: modules.reduce((sum, module) => sum + module.frameworkRoutes.length, 0),
+            expressControllers: modules.reduce((sum, module) => sum + module.symbols
+                .filter(symbol => symbol.frameworkRole === 'express-controller').length, 0),
+            mongooseModels: modules.reduce((sum, module) => sum + module.symbols
+                .filter(symbol => symbol.frameworkRole === 'mongoose-model').length, 0)
         }
     };
 }

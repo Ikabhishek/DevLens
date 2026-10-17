@@ -33,11 +33,15 @@ function symbolId(filePath: string, symbol: CodeSymbolInfo): string {
 }
 
 function callRoot(expression: string): string | undefined {
+    const thisMatch = expression.match(/^this\.([A-Za-z_$][\w$]*)/);
+    if (thisMatch) return thisMatch[1];
     const match = expression.match(/^([A-Za-z_$][\w$]*)/);
     return match?.[1];
 }
 
 function callMember(expression: string): string | undefined {
+    const thisMatch = expression.match(/^this\.[A-Za-z_$][\w$]*\.([A-Za-z_$][\w$]*)/);
+    if (thisMatch) return thisMatch[1];
     const match = expression.match(/^[A-Za-z_$][\w$]*\.([A-Za-z_$][\w$]*)/);
     return match?.[1];
 }
@@ -68,14 +72,24 @@ export function buildRelationshipGraph(
             if (!root) continue;
             const member = callMember(call.name);
 
+            const injectedDependency = call.containingClass
+                ? module.injectedDependencies.find(dependency =>
+                    dependency.ownerClass === call.containingClass && dependency.propertyName === root
+                )
+                : undefined;
             const localTarget = (symbolsByFile.get(module.filePath) ?? []).find(symbol =>
-                symbol.name === root && (symbol.kind === 'function' || symbol.kind === 'method')
+                symbol.name === root && (symbol.kind === 'function' || symbol.kind === 'method' ||
+                    (symbol.kind === 'variable' && !member))
             );
             const importedCandidates = outgoingEdges
-                .filter(edge => edge.importedNames.includes(root) || edge.importedNames.includes('*'))
+                .filter(edge => edge.importedNames.includes(root) ||
+                    (injectedDependency && edge.importedNames.includes(injectedDependency.typeName)) ||
+                    edge.importedNames.includes('*'))
                 .flatMap(edge => symbolsByFile.get(edge.to) ?? []);
             const importedTarget = member
-                ? importedCandidates.find(symbol => symbol.name === member)
+                ? importedCandidates.find(symbol => symbol.name === member) ??
+                    importedCandidates.find(symbol => symbol.name === root ||
+                        symbol.name === injectedDependency?.typeName)
                 : importedCandidates.find(symbol => symbol.name === root || symbol.isExported);
 
             calls.push({
@@ -84,6 +98,19 @@ export function buildRelationshipGraph(
                 expression: call.name,
                 line: call.line,
                 targetId: localTarget?.id ?? importedTarget?.id
+            });
+        }
+
+        for (const route of module.frameworkRoutes) {
+            const target = outgoingEdges
+                .filter(edge => edge.importedNames.includes(route.componentName) || edge.importedNames.includes('*'))
+                .flatMap(edge => symbolsByFile.get(edge.to) ?? [])
+                .find(symbol => symbol.name === route.componentName);
+            calls.push({
+                callerFile: module.filePath,
+                expression: `route:${route.path} -> ${route.componentName}`,
+                line: route.line,
+                targetId: target?.id
             });
         }
     }

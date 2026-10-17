@@ -119,6 +119,14 @@ function getWebviewContent(data: DashboardData, logoUri: string, cspSource: stri
             <span><strong>${title}</strong><small>${description}</small></span>
             <span class="action-arrow">›</span>
         </button>`).join('');
+    const frameworkCoverage = [
+        [data.ast.totals.angularComponents, 'Angular components'],
+        [data.ast.totals.angularServices, 'Angular services'],
+        [data.ast.totals.angularRoutes, 'Angular routes'],
+        [data.ast.totals.expressControllers, 'Express controllers'],
+        [data.ast.totals.mongooseModels, 'Mongoose models']
+    ].filter(([count]) => Number(count) > 0)
+        .map(([count, label]) => `${count} ${label}`).join(' · ');
     const sourceExtensions = new Set([
         '.ts', '.tsx', '.js', '.jsx', '.mts', '.cts', '.mjs', '.cjs'
     ]);
@@ -133,9 +141,11 @@ function getWebviewContent(data: DashboardData, logoUri: string, cspSource: stri
     const categoryFor = (file: string): string => {
         const normalized = file.toLowerCase();
         const baseName = path.posix.basename(normalized);
-        if (/(^|\/)(components?|widgets?)(\/|$)/.test(normalized)) return 'component';
+        if (/(^|\/)(components?|widgets?)(\/|$)/.test(normalized) || /\.component\.(ts|tsx|js|jsx)$/.test(baseName)) return 'component';
         if (/(^|\/)(pages?|views?|routes?)(\/|$)/.test(normalized) || /^(app|main|index)\.(tsx|jsx|ts|js)$/.test(baseName)) return 'page';
-        if (/(^|\/)(services?|utils?|helpers?|lib)(\/|$)/.test(normalized) || /api\.(tsx|jsx|ts|js)$/.test(baseName)) return 'utility';
+        if (/(^|\/)(services?|utils?|helpers?|lib|controllers?|models?|schemas?)(\/|$)/.test(normalized) ||
+            /\.(service|controller|model|schema)\.(ts|tsx|js|jsx)$/.test(baseName) ||
+            /api\.(tsx|jsx|ts|js)$/.test(baseName)) return 'utility';
         return 'module';
     };
     const graphData = {
@@ -183,7 +193,7 @@ ul { margin: 0; padding-left: 18px; } li { margin: 8px 0; } .file-link { border:
 <section class="hero"><div class="brand"><div class="logo"><img src="${escapeHtml(logoUri)}" alt="DevLens"></div><div><h1>DevLens</h1><p class="muted">Understand your codebase through architecture and code relationships.</p></div></div><div class="project-meta"><strong>${escapeHtml(data.project.name)}</strong><p class="muted">Last scanned: ${escapeHtml(date)}</p><button class="refresh" id="refresh">Refresh dashboard</button></div></section>
 <section class="workspace-grid"><article class="architecture"><div class="architecture-heading"><div><h2>Code architecture</h2><p class="muted">Resolved imports · select a node or edge · drag to pan</p></div><span class="muted">${graphData.nodes.length} connected files</span></div><div class="graph-controls"><input id="graph-search" type="search" placeholder="Search files…" aria-label="Search files in graph"><button id="zoom-out" title="Zoom out">−</button><button id="zoom-in" title="Zoom in">+</button><button id="fit-graph">Fit</button><button id="highlight-deps">Highlight dependencies</button></div><svg id="architecture-graph" role="img" aria-label="Interactive project architecture graph"></svg><div class="graph-legend"><span><i class="legend-dot" style="background:#2dd4bf"></i>Component</span><span><i class="legend-dot" style="background:#38bdf8"></i>Page / entry</span><span><i class="legend-dot" style="background:#fb923c"></i>Service / utility</span><span><i class="legend-dot" style="background:#a78bfa"></i>Module</span></div></article>
 <aside class="panel detail-card"><h2>File Structure</h2><p class="muted">Workspace overview</p><div class="stats"><div class="stat"><strong>${data.project.totalFiles}</strong><span>Files</span></div><div class="stat"><strong>${data.project.totalFolders}</strong><span>Folders</span></div><div class="stat"><strong>${formatSize(data.project.totalSizeBytes)}</strong><span>Total size</span></div><div class="stat"><strong>${visibleEdges.length}</strong><span>Dependencies</span></div></div><h2>Selected file</h2><div id="selected-file-details" class="detail-empty">Select a graph node to inspect its imports, dependents, language, and file size.</div><h2 style="margin-top:16px">Selected connection</h2><div id="selected-edge-details" class="detail-empty">Select an edge to see which symbols it imports.</div></aside></section>
-<section class="grid"><article class="panel"><h2>Languages</h2><div class="language-layout"><div class="donut"></div><div class="language-list">${languages.map(language => `<div class="language-row"><span class="color" style="background:${language.color}"></span><span>${escapeHtml(language.name)}</span><span>${language.count} (${language.percentage.toFixed(1)}%)</span></div>`).join('')}</div></div></article><article class="panel"><h2>Project analysis</h2><div class="stats"><div class="stat"><strong>${data.ast.totals.functions}</strong><span>Functions</span></div><div class="stat"><strong>${data.ast.totals.classes}</strong><span>Classes</span></div><div class="stat"><strong>${data.ast.totals.calls}</strong><span>Calls</span></div><div class="stat"><strong>${data.project.configFiles.length}</strong><span>Config files</span></div></div><h2>Detected technologies</h2><div class="chip-row">${architecture}</div></article><article class="panel"><h2>Configuration files</h2><ul>${configFiles}</ul></article><article class="panel"><h2>Most connected modules</h2><ul>${mostConnected(data.graph).map(item => `<li><button class="file-link" data-file="${escapeHtml(item.file)}">${escapeHtml(item.file)}</button> <span class="muted">${item.count} local connections</span></li>`).join('') || '<li class="muted">No local import connections yet.</li>'}</ul></article></section>
+<section class="grid"><article class="panel"><h2>Languages</h2><div class="language-layout"><div class="donut"></div><div class="language-list">${languages.map(language => `<div class="language-row"><span class="color" style="background:${language.color}"></span><span>${escapeHtml(language.name)}</span><span>${language.count} (${language.percentage.toFixed(1)}%)</span></div>`).join('')}</div></div></article><article class="panel"><h2>Project analysis</h2><div class="stats"><div class="stat"><strong>${data.ast.totals.functions}</strong><span>Functions</span></div><div class="stat"><strong>${data.ast.totals.classes}</strong><span>Classes</span></div><div class="stat"><strong>${data.ast.totals.calls}</strong><span>Calls</span></div><div class="stat"><strong>${data.project.configFiles.length}</strong><span>Config files</span></div></div>${frameworkCoverage ? `<p class="muted">${escapeHtml(frameworkCoverage)}</p>` : ''}<h2>Detected technologies</h2><div class="chip-row">${architecture}</div></article><article class="panel"><h2>Configuration files</h2><ul>${configFiles}</ul></article><article class="panel"><h2>Most connected modules</h2><ul>${mostConnected(data.graph).map(item => `<li><button class="file-link" data-file="${escapeHtml(item.file)}">${escapeHtml(item.file)}</button> <span class="muted">${item.count} local connections</span></li>`).join('') || '<li class="muted">No local import connections yet.</li>'}</ul></article></section>
 <section class="actions"><h2>DevLens tools</h2><div class="action-grid">${actionCards}</div></section>
 </main><script>
 const vscode = acquireVsCodeApi();

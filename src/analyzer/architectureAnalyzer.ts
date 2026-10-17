@@ -92,6 +92,19 @@ export async function detectArchitecture(
         });
     }
 
+    const isMern = dependencies.has('react') && dependencies.has('express') &&
+        (dependencies.has('mongoose') || dependencies.has('mongodb'));
+    if (isMern) {
+        const key = 'backend:MERN stack';
+        if (!seen.has(key)) {
+            components.push({
+                category: 'backend',
+                name: 'MERN stack',
+                evidence: 'React, Express, and MongoDB/Mongoose dependencies'
+            });
+        }
+    }
+
     if (project.configFiles.includes('vite.config.ts') || project.configFiles.includes('vite.config.js')) {
         const key = 'build-tool:Vite';
         if (!seen.has(key)) {
