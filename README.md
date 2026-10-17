@@ -120,8 +120,8 @@ Contributions and bug reports are welcome. When reporting an issue, include:
 
 ## License
 
-Add your chosen license here before publishing the repository. If this project uses an open-source license, include the corresponding `LICENSE` file.
-
+This project is licensed under the MIT License.
+See the [LICENSE](LICENSE) file for details.
 ---
 
 **DevLens** — Explore your codebase. Understand its relationships. Trace how it works.

@@ -2,13 +2,20 @@
   "name": "devlens",
   "displayName": "DevLens",
   "description": "Understand your codebase through architecture and code relationships.",
+  "publisher": "AbhishekShukla",
   "version": "0.0.1",
   "engines": {
     "vscode": "^1.140.0"
   },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Ikabhishek/DevLens.git"
+  },
   "categories": [
     "Other"
   ],
+ "icon": "resources/devlens-icon.png",
+ "license": "MIT",
   "activationEvents": [],
   "main": "./out/extension.js",
   
