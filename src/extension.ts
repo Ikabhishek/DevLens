@@ -17,16 +17,39 @@ import { showArchitectureDetectionPanel } from './providers/architectureDetectio
 import { traceFlow } from './graph/flowAnalyzer';
 import { showFlowPanel } from './providers/flowPanel';
 import { analyzeHttp } from './analyzer/httpAnalyzer';
+import { DashboardData, showDashboard } from './providers/dashboardPanel';
+
+async function loadDashboardData(workspaceUri: vscode.Uri): Promise<DashboardData> {
+    const project = await scanProject(workspaceUri);
+    const filePaths = project.files.map(file => file.relativePath);
+    const [imports, ast, architecture] = await Promise.all([
+        analyzeImportsAndExports(workspaceUri, filePaths),
+        analyzeAst(workspaceUri, filePaths),
+        detectArchitecture(workspaceUri, project)
+    ]);
+    return {
+        project,
+        ast,
+        graph: buildDependencyGraph(imports, filePaths),
+        architecture
+    };
+}
 
 export function activate(context: vscode.ExtensionContext) {
     const projectTreeProvider = new ProjectTreeProvider();
 
+const projectTreeView = vscode.window.createTreeView(
+    'devlens.projectView',
+    { treeDataProvider: projectTreeProvider }
+);
+
+context.subscriptions.push(projectTreeView, projectTreeProvider);
 context.subscriptions.push(
-    vscode.window.registerTreeDataProvider(
-        'devlens.projectView',
-        projectTreeProvider
-    ),
-    projectTreeProvider
+    projectTreeView.onDidChangeVisibility(event => {
+        if (event.visible) {
+            void vscode.commands.executeCommand('devlens.openDashboard');
+        }
+    })
 );
 
 const refreshDashboard = vscode.commands.registerCommand(
@@ -37,6 +60,36 @@ const refreshDashboard = vscode.commands.registerCommand(
 );
 
 context.subscriptions.push(refreshDashboard);
+
+const openDashboard = vscode.commands.registerCommand(
+    'devlens.openDashboard',
+    async () => {
+        const workspace = vscode.workspace.workspaceFolders?.[0];
+        if (!workspace) {
+            vscode.window.showWarningMessage('DevLens: Open a project folder first.');
+            return;
+        }
+        try {
+            await vscode.window.withProgress(
+                {
+                    location: vscode.ProgressLocation.Notification,
+                    title: 'DevLens: Loading project dashboard...',
+                    cancellable: false
+                },
+                () => showDashboard(
+                    workspace.uri,
+                    context.extensionUri,
+                    () => loadDashboardData(workspace.uri)
+                )
+            );
+        } catch (error) {
+            const details = error instanceof Error ? error.message : String(error);
+            vscode.window.showErrorMessage(`DevLens dashboard failed to load: ${details}`);
+        }
+    }
+);
+
+context.subscriptions.push(openDashboard);
     const analyzeProject = vscode.commands.registerCommand(
         'devlens.analyzeProject',
         async () => {

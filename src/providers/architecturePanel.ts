@@ -71,8 +71,13 @@ function getWebviewContent(
     const sourceExtensions = new Set([
         '.ts', '.tsx', '.js', '.jsx', '.mts', '.cts', '.mjs', '.cjs'
     ]);
+    const isToolConfig = (file: string): boolean =>
+        /(^|\/)(?:vite|webpack|eslint|prettier|jest|vitest|tailwind|postcss)\.config\./i.test(file);
     const nodes = [...new Set(graph.nodes)]
-        .filter(file => sourceExtensions.has(path.posix.extname(file).toLowerCase()))
+        .filter(file =>
+            sourceExtensions.has(path.posix.extname(file).toLowerCase()) &&
+            !isToolConfig(file)
+        )
         .sort();
     const visibleNodes = new Set(nodes);
     const visibleEdges = graph.edges.filter(edge =>
@@ -504,7 +509,7 @@ function getWebviewContent(
                 if (!from || !to || !target) return '';
                 const curveY = Math.max(45, (to.y - from.y) / 2);
                 const title = edge.names.length ? 'Imports: ' + edge.names.join(', ') : 'Imports module';
-                return '<path class="graph-edge" d="M ' + from.x + ' ' + (from.y + 26) + ' C ' + from.x + ' ' + (from.y + curveY) + ', ' + to.x + ' ' + (to.y - curveY) + ', ' + to.x + ' ' + (to.y - 26) + '" stroke="' + palette[target.category] + '" marker-end="url(#arrow-' + target.category + ')"><title>' + escapeXml(title) + '</title></path>';
+                return '<path class="graph-edge" d="M ' + from.x + ' ' + (from.y + 26) + ' C ' + from.x + ' ' + (from.y + curveY) + ', ' + to.x + ' ' + (to.y - curveY) + ', ' + to.x + ' ' + (to.y - 26) + '" stroke="' + palette[target.category] + '" fill="none" marker-end="url(#arrow-' + target.category + ')"><title>' + escapeXml(title) + '</title></path>';
             }).join('');
             const nodeMarkup = graphData.nodes.map(node => {
                 const point = positions.get(node.id);

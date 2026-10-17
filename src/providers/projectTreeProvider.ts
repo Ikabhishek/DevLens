@@ -1,162 +1,69 @@
-
 import * as vscode from 'vscode';
 
-export class ProjectTreeProvider
-    implements vscode.TreeDataProvider<vscode.TreeItem> {
+const IGNORED_DIRECTORIES = new Set([
+    '.git', '.svn', 'node_modules', 'dist', 'build', 'coverage',
+    '.next', '.nuxt', '.venv', 'venv', '__pycache__', 'out'
+]);
 
-    private readonly onDidChangeTreeDataEmitter =
-        new vscode.EventEmitter<
-            vscode.TreeItem | undefined | null | void
-        >();
+class WorkspaceItem extends vscode.TreeItem {
+    constructor(
+        readonly uri: vscode.Uri,
+        readonly isDirectory: boolean,
+        label: string
+    ) {
+        super(
+            label,
+            isDirectory
+                ? vscode.TreeItemCollapsibleState.Collapsed
+                : vscode.TreeItemCollapsibleState.None
+        );
+        this.resourceUri = uri;
+        this.tooltip = uri.fsPath;
+        if (!isDirectory) {
+            this.command = {
+                command: 'vscode.open',
+                title: 'Open File',
+                arguments: [uri]
+            };
+        }
+    }
+}
 
-    readonly onDidChangeTreeData =
-        this.onDidChangeTreeDataEmitter.event;
+export class ProjectTreeProvider implements vscode.TreeDataProvider<WorkspaceItem> {
+    private readonly onDidChangeTreeDataEmitter = new vscode.EventEmitter<
+        WorkspaceItem | undefined | null | void
+    >();
 
-    getTreeItem(element: vscode.TreeItem): vscode.TreeItem {
+    readonly onDidChangeTreeData = this.onDidChangeTreeDataEmitter.event;
+
+    getTreeItem(element: WorkspaceItem): vscode.TreeItem {
         return element;
     }
 
-    getChildren(): vscode.TreeItem[] {
-        const workspace =
-            vscode.workspace.workspaceFolders?.[0];
+    async getChildren(element?: WorkspaceItem): Promise<WorkspaceItem[]> {
+        const workspace = vscode.workspace.workspaceFolders?.[0];
+        if (!workspace) return [];
 
-        if (!workspace) {
-            const emptyItem = new vscode.TreeItem(
-                'Open a project folder',
-                vscode.TreeItemCollapsibleState.None
-            );
-
-            emptyItem.iconPath =
-                new vscode.ThemeIcon('folder-open');
-
-            return [emptyItem];
+        const directory = element?.uri ?? workspace.uri;
+        try {
+            const entries = await vscode.workspace.fs.readDirectory(directory);
+            return entries
+                .filter(([name, type]) =>
+                    type !== vscode.FileType.SymbolicLink &&
+                    !(type === vscode.FileType.Directory && IGNORED_DIRECTORIES.has(name))
+                )
+                .sort(([aName, aType], [bName, bType]) => {
+                    if (aType !== bType) return aType === vscode.FileType.Directory ? -1 : 1;
+                    return aName.localeCompare(bName);
+                })
+                .map(([name, type]) => new WorkspaceItem(
+                    vscode.Uri.joinPath(directory, name),
+                    type === vscode.FileType.Directory,
+                    name
+                ));
+        } catch {
+            return [];
         }
-
-        const projectItem = new vscode.TreeItem(
-            workspace.name,
-            vscode.TreeItemCollapsibleState.None
-        );
-
-        projectItem.iconPath =
-            new vscode.ThemeIcon('folder');
-
-        projectItem.tooltip = workspace.uri.fsPath;
-
-        const analyzeItem = new vscode.TreeItem(
-            'Analyze Project',
-            vscode.TreeItemCollapsibleState.None
-        );
-
-        analyzeItem.iconPath =
-            new vscode.ThemeIcon('search');
-
-        analyzeItem.description = 'Scan files and statistics';
-
-        analyzeItem.command = {
-            command: 'devlens.analyzeProject',
-            title: 'Analyze Project'
-        };
-
-        const architectureItem = new vscode.TreeItem(
-            'Visualize Architecture',
-            vscode.TreeItemCollapsibleState.None
-        );
-
-        architectureItem.iconPath =
-            new vscode.ThemeIcon('type-hierarchy');
-
-        architectureItem.description =
-            'Explore local dependencies';
-
-        architectureItem.command = {
-            command: 'devlens.visualizeArchitecture',
-            title: 'Visualize Architecture'
-        };
-
-        const relationshipsItem = new vscode.TreeItem(
-            'Explore Code Relationships',
-            vscode.TreeItemCollapsibleState.None
-        );
-
-        relationshipsItem.iconPath = new vscode.ThemeIcon('references');
-        relationshipsItem.description = 'Find callers and dependencies';
-        relationshipsItem.command = {
-            command: 'devlens.exploreRelationships',
-            title: 'Explore Code Relationships'
-        };
-
-        const explainCodeItem = new vscode.TreeItem(
-            'Why Is This Code Here?',
-            vscode.TreeItemCollapsibleState.None
-        );
-
-        explainCodeItem.iconPath = new vscode.ThemeIcon('question');
-        explainCodeItem.description = 'Explain a selected symbol';
-        explainCodeItem.command = {
-            command: 'devlens.explainCode',
-            title: 'Why Is This Code Here?'
-        };
-
-        const impactItem = new vscode.TreeItem(
-            'Analyze Impact',
-            vscode.TreeItemCollapsibleState.None
-        );
-
-        impactItem.iconPath = new vscode.ThemeIcon('warning');
-        impactItem.description = 'Identify affected files';
-        impactItem.command = {
-            command: 'devlens.analyzeImpact',
-            title: 'Analyze Impact'
-        };
-
-        const detectArchitectureItem = new vscode.TreeItem(
-            'Detect Architecture',
-            vscode.TreeItemCollapsibleState.None
-        );
-
-        detectArchitectureItem.iconPath = new vscode.ThemeIcon('symbol-structure');
-        detectArchitectureItem.description = 'Identify project technologies';
-        detectArchitectureItem.command = {
-            command: 'devlens.detectArchitecture',
-            title: 'Detect Architecture'
-        };
-
-        const traceFlowItem = new vscode.TreeItem(
-            'Trace Flow',
-            vscode.TreeItemCollapsibleState.None
-        );
-
-        traceFlowItem.iconPath = new vscode.ThemeIcon('debug-step-over');
-        traceFlowItem.description = 'Follow downstream code flow';
-        traceFlowItem.command = {
-            command: 'devlens.traceFlow',
-            title: 'Trace Flow'
-        };
-
-        const refreshItem = new vscode.TreeItem(
-            'Refresh Dashboard',
-            vscode.TreeItemCollapsibleState.None
-        );
-
-        refreshItem.iconPath =
-            new vscode.ThemeIcon('refresh');
-
-        refreshItem.command = {
-            command: 'devlens.refreshDashboard',
-            title: 'Refresh Dashboard'
-        };
-
-        return [
-            projectItem,
-            analyzeItem,
-            architectureItem,
-            relationshipsItem,
-            explainCodeItem,
-            impactItem,
-            detectArchitectureItem,
-            traceFlowItem,
-            refreshItem
-        ];
     }
 
     refresh(): void {

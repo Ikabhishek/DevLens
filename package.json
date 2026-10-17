@@ -41,6 +41,10 @@
         {
             "command": "devlens.traceFlow",
             "title": "DevLens: Trace Flow"
+        },
+        {
+            "command": "devlens.openDashboard",
+            "title": "DevLens: Open Project Dashboard"
         }
     ],
     "viewsContainers": {
