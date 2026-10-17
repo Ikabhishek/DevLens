@@ -83,9 +83,36 @@
                 "when": "editorTextFocus"
             }
         ]
+    },
+    "configuration": {
+        "title": "DevLens",
+        "properties": {
+            "devlens.exclude": {
+                "type": "array",
+                "items": { "type": "string" },
+                "default": [],
+                "markdownDescription": "Additional directory names to exclude from DevLens scanning and analysis (e.g. `[\"coverage\", \"tmp\", \"generated\"]`). The built-in defaults (`node_modules`, `.git`, `dist`, `build`, `out`, etc.) are always excluded."
+            },
+            "devlens.traceMaxDepth": {
+                "type": "number",
+                "default": 8,
+                "minimum": 2,
+                "maximum": 20,
+                "description": "Maximum call-chain depth for DevLens: Trace Flow."
+            },
+            "devlens.showExternalImports": {
+                "type": "boolean",
+                "default": false,
+                "description": "Reserved for future use: include external package imports in the architecture graph."
+            },
+            "devlens.enableFileWatching": {
+                "type": "boolean",
+                "default": true,
+                "description": "Automatically update DevLens analysis incrementally in the background when files are saved or modified."
+            }
+        }
     }
-}
-,
+},
   "scripts": {
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",

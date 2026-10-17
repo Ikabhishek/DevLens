@@ -6,7 +6,7 @@ import {
     ProjectModel
 } from '../models/projectModel';
 
-const IGNORED_DIRECTORIES = new Set([
+export const IGNORED_DIRECTORIES = new Set([
     '.git',
     '.svn',
     'node_modules',
@@ -21,7 +21,7 @@ const IGNORED_DIRECTORIES = new Set([
     'out'
 ]);
 
-const CONFIG_FILES = new Set([
+export const CONFIG_FILES = new Set([
     'package.json',
     'tsconfig.json',
     'jsconfig.json',
@@ -39,7 +39,7 @@ const CONFIG_FILES = new Set([
     'vite.config.ts'
 ]);
 
-const LANGUAGE_BY_EXTENSION: Record<string, string> = {
+export const LANGUAGE_BY_EXTENSION: Record<string, string> = {
     '.ts': 'TypeScript',
     '.tsx': 'TypeScript React',
     '.js': 'JavaScript',
@@ -72,8 +72,15 @@ const LANGUAGE_BY_EXTENSION: Record<string, string> = {
 };
 
 export async function scanProject(
-    root: vscode.Uri
+    root: vscode.Uri,
+    extraExclude: string[] = []
 ): Promise<ProjectModel> {
+    const ignoredDirs = extraExclude.length
+        ? new Set([
+              ...IGNORED_DIRECTORIES,
+              ...extraExclude.filter(d => typeof d === 'string' && d.trim().length > 0)
+          ])
+        : IGNORED_DIRECTORIES;
     const files: ProjectFile[] = [];
     const folders: ProjectFolder[] = [];
     const configFiles: string[] = [];
@@ -93,7 +100,7 @@ export async function scanProject(
 
             if (
                 type === vscode.FileType.Directory &&
-                IGNORED_DIRECTORIES.has(name)
+                ignoredDirs.has(name)
             ) {
                 continue;
             }

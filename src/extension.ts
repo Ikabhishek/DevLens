@@ -17,25 +17,32 @@ import { showArchitectureDetectionPanel } from './providers/architectureDetectio
 import { traceFlow } from './graph/flowAnalyzer';
 import { showFlowPanel } from './providers/flowPanel';
 import { analyzeHttp } from './analyzer/httpAnalyzer';
-import { DashboardData, showDashboard } from './providers/dashboardPanel';
+import { DashboardData, refreshActiveDashboard, showDashboard } from './providers/dashboardPanel';
+import { AnalysisCache } from './cache/analysisCache';
+
+const analysisCache = new AnalysisCache();
+
+function getDevLensConfig(): { exclude: string[]; traceMaxDepth: number; enableFileWatching: boolean } {
+    const cfg = vscode.workspace.getConfiguration('devlens');
+    return {
+        exclude: cfg.get<string[]>('exclude', []),
+        traceMaxDepth: cfg.get<number>('traceMaxDepth', 8),
+        enableFileWatching: cfg.get<boolean>('enableFileWatching', true)
+    };
+}
 
 async function loadDashboardData(workspaceUri: vscode.Uri): Promise<DashboardData> {
-    const project = await scanProject(workspaceUri);
-    const filePaths = project.files.map(file => file.relativePath);
-    const [imports, ast, architecture] = await Promise.all([
-        analyzeImportsAndExports(workspaceUri, filePaths),
-        analyzeAst(workspaceUri, filePaths),
-        detectArchitecture(workspaceUri, project)
-    ]);
+    const snapshot = await analysisCache.getSnapshot(workspaceUri, false, getDevLensConfig().exclude);
     return {
-        project,
-        ast,
-        graph: buildDependencyGraph(imports, filePaths),
-        architecture
+        project: snapshot.project,
+        ast: snapshot.ast,
+        graph: snapshot.dependencyGraph,
+        architecture: snapshot.architecture
     };
 }
 
 export function activate(context: vscode.ExtensionContext) {
+    context.subscriptions.push(analysisCache);
     const projectTreeProvider = new ProjectTreeProvider();
 
 const projectTreeView = vscode.window.createTreeView(
@@ -44,6 +51,75 @@ const projectTreeView = vscode.window.createTreeView(
 );
 
 context.subscriptions.push(projectTreeView, projectTreeProvider);
+
+// Status bar indicator for cache state & quick sync feedback
+const statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
+statusBarItem.text = '$(eye) DevLens';
+statusBarItem.tooltip = 'DevLens Code Intelligence (Incremental Cache Active)';
+statusBarItem.command = 'devlens.openDashboard';
+statusBarItem.show();
+context.subscriptions.push(statusBarItem);
+
+context.subscriptions.push(
+    analysisCache.onDidChange(event => {
+        if (event.kind === 'incremental') {
+            statusBarItem.text = `$(check) DevLens (${event.durationMs}ms)`;
+            setTimeout(() => {
+                statusBarItem.text = '$(eye) DevLens';
+            }, 2500);
+            refreshActiveDashboard();
+            projectTreeProvider.refresh();
+        } else {
+            statusBarItem.text = `$(eye) DevLens (${event.affectedFiles.length} files)`;
+            setTimeout(() => {
+                statusBarItem.text = '$(eye) DevLens';
+            }, 3000);
+        }
+    })
+);
+
+// Incremental file watching on save and file system events
+const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+if (workspaceFolder) {
+    context.subscriptions.push(
+        vscode.workspace.onDidSaveTextDocument(doc => {
+            if (!getDevLensConfig().enableFileWatching) {
+                return;
+            }
+            analysisCache.queueFileChange(workspaceFolder.uri, doc.uri, getDevLensConfig().exclude);
+        })
+    );
+
+    const watcher = vscode.workspace.createFileSystemWatcher('**/*');
+    context.subscriptions.push(watcher);
+    watcher.onDidChange(uri => {
+        if (!getDevLensConfig().enableFileWatching) {
+            return;
+        }
+        analysisCache.queueFileChange(workspaceFolder.uri, uri, getDevLensConfig().exclude);
+    });
+    watcher.onDidCreate(uri => {
+        if (!getDevLensConfig().enableFileWatching) {
+            return;
+        }
+        analysisCache.queueFileChange(workspaceFolder.uri, uri, getDevLensConfig().exclude);
+    });
+    watcher.onDidDelete(uri => {
+        if (!getDevLensConfig().enableFileWatching) {
+            return;
+        }
+        analysisCache.queueFileChange(workspaceFolder.uri, uri, getDevLensConfig().exclude);
+    });
+
+    context.subscriptions.push(
+        vscode.workspace.onDidChangeConfiguration(e => {
+            if (e.affectsConfiguration('devlens')) {
+                analysisCache.invalidate();
+            }
+        })
+    );
+}
+
 context.subscriptions.push(
     projectTreeView.onDidChangeVisibility(event => {
         if (event.visible) {
@@ -56,6 +132,7 @@ const refreshDashboard = vscode.commands.registerCommand(
     'devlens.refreshDashboard',
     () => {
         projectTreeProvider.refresh();
+        refreshActiveDashboard();
     }
 );
 
@@ -111,9 +188,8 @@ context.subscriptions.push(openDashboard);
                         cancellable: false
                     },
                     async () => {
-                        const project = await scanProject(
-                            workspace.uri
-                        );
+                    const snapshot = await analysisCache.getSnapshot(workspace.uri, true, getDevLensConfig().exclude);
+                    const project = snapshot.project;
                         
                         const languages = Object.entries(
                             project.languageCounts
@@ -250,20 +326,8 @@ const visualizeArchitecture = vscode.commands.registerCommand(
                     cancellable: false
                 },
                 async () => {
-                    const project = await scanProject(workspace.uri);
-
-                    const analysis = await analyzeImportsAndExports(
-                        workspace.uri,
-                        project.files.map(file => file.relativePath)
-                    );
-
-                    const graph = buildDependencyGraph(
-    analysis,
-    project.files.map(file => file.relativePath)
-);
-
-                    const architecture = await detectArchitecture(workspace.uri, project);
-                    showArchitecturePanel(graph, workspace.uri, architecture);
+                    const snapshot = await analysisCache.getSnapshot(workspace.uri, false, getDevLensConfig().exclude);
+                    showArchitecturePanel(snapshot.dependencyGraph, workspace.uri, snapshot.architecture);
                 }
             );
         } catch (error) {
@@ -297,14 +361,8 @@ const exploreRelationships = vscode.commands.registerCommand(
                     cancellable: false
                 },
                 async () => {
-                    const project = await scanProject(workspace.uri);
-                    const filePaths = project.files.map(file => file.relativePath);
-                    const [imports, ast] = await Promise.all([
-                        analyzeImportsAndExports(workspace.uri, filePaths),
-                        analyzeAst(workspace.uri, filePaths)
-                    ]);
-                    const dependencyGraph = buildDependencyGraph(imports, filePaths);
-                    const relationshipGraph = buildRelationshipGraph(ast, dependencyGraph);
+                    const snapshot = await analysisCache.getSnapshot(workspace.uri, false, getDevLensConfig().exclude);
+                    const relationshipGraph = snapshot.relationshipGraph;
 
                     if (!relationshipGraph.symbols.length) {
                         vscode.window.showInformationMessage(
@@ -345,90 +403,103 @@ context.subscriptions.push(exploreRelationships);
 
 const explainCode = vscode.commands.registerCommand(
     'devlens.explainCode',
-    async () => {
+    async (arg?: string | { symbolName?: string; symbolId?: string }) => {
         const workspace = vscode.workspace.workspaceFolders?.[0];
-        const editor = vscode.window.activeTextEditor;
         if (!workspace) {
             vscode.window.showWarningMessage('DevLens: Open a project folder first.');
             return;
         }
-        if (!editor) {
-            vscode.window.showInformationMessage(
-                'DevLens: Open a JavaScript or TypeScript file and select a symbol.'
-            );
-            return;
-        }
 
-        const selectedText = editor.document.getText(editor.selection).trim();
-        const wordRange = selectedText
-            ? undefined
-            : editor.document.getWordRangeAtPosition(editor.selection.active);
-        const symbolName = selectedText || (wordRange
+        const editor = vscode.window.activeTextEditor;
+        const passedSymbolName = typeof arg === 'string'
+            ? arg.trim()
+            : (arg && typeof arg === 'object' && typeof arg.symbolName === 'string' ? arg.symbolName.trim() : '');
+        const passedSymbolId = (arg && typeof arg === 'object' && typeof arg.symbolId === 'string')
+            ? arg.symbolId
+            : undefined;
+
+        const selectedText = editor?.document.getText(editor.selection).trim() ?? '';
+        const wordRange = editor && !selectedText
+            ? editor.document.getWordRangeAtPosition(editor.selection.active)
+            : undefined;
+        const textSymbolName = selectedText || (editor && wordRange
             ? editor.document.getText(wordRange)
             : '');
-        if (!/^[A-Za-z_$][\w$]*$/.test(symbolName)) {
-            vscode.window.showInformationMessage(
-                'DevLens: Select a single function, class, method, or variable name.'
-            );
-            return;
-        }
+
+        const symbolName = passedSymbolName || textSymbolName;
+        const hasSelectedName = /^[A-Za-z_$][\w$]*$/.test(symbolName);
+        const activeFile = editor
+            ? vscode.workspace.asRelativePath(editor.document.uri, false).replace(/\\/g, '/')
+            : undefined;
 
         try {
             await vscode.window.withProgress(
                 {
                     location: vscode.ProgressLocation.Notification,
-                    title: `DevLens: Explaining ${symbolName}...`,
+                    title: hasSelectedName ? `DevLens: Explaining ${symbolName}...` : 'DevLens: Finding symbols to explain...',
                     cancellable: false
                 },
                 async () => {
-                    const project = await scanProject(workspace.uri);
-                    const filePaths = project.files.map(file => file.relativePath);
-                    const [imports, ast] = await Promise.all([
-                        analyzeImportsAndExports(workspace.uri, filePaths),
-                        analyzeAst(workspace.uri, filePaths)
-                    ]);
-                    const dependencyGraph = buildDependencyGraph(imports, filePaths);
-                    const relationshipGraph = buildRelationshipGraph(ast, dependencyGraph);
-                    const activeFile = vscode.workspace.asRelativePath(editor.document.uri, false)
-                        .replace(/\\/g, '/');
-                    const matches = relationshipGraph.symbols.filter(symbol =>
-                        symbol.name === symbolName
-                    ).sort((a, b) => {
-                        const aCurrentFile = a.filePath === activeFile ? -1 : 0;
-                        const bCurrentFile = b.filePath === activeFile ? -1 : 0;
-                        return aCurrentFile - bCurrentFile || a.filePath.localeCompare(b.filePath);
-                    });
+                    const snapshot = await analysisCache.getSnapshot(workspace.uri, false, getDevLensConfig().exclude);
+                    const relationshipGraph = snapshot.relationshipGraph;
 
-                    if (!matches.length) {
+                    if (!relationshipGraph.symbols.length) {
                         vscode.window.showInformationMessage(
-                            `DevLens: No analyzed symbol named "${symbolName}" was found.`
+                            'DevLens: No JavaScript or TypeScript symbols were found in the project.'
                         );
                         return;
                     }
 
-                    const selectedSymbol = matches.length === 1
-                        ? matches[0]
-                        : await vscode.window.showQuickPick(
-                            matches.map(symbol => ({
-                                label: symbol.name,
-                                description: `${symbol.kind} · ${symbol.filePath}:${symbol.line}`,
-                                symbolId: symbol.id
-                            })),
-                            {
-                                title: `Why Is This Code Here? ${symbolName}`,
-                                placeHolder: 'Choose the symbol to explain'
-                            }
-                        );
-                    if (!selectedSymbol) return;
+                    let symbolId: string | undefined = passedSymbolId;
 
-                    const symbolId = 'symbolId' in selectedSymbol
-                        ? selectedSymbol.symbolId
-                        : selectedSymbol.id;
+                    if (!symbolId) {
+                        const candidates = relationshipGraph.symbols
+                            .filter(symbol => !hasSelectedName || symbol.name === symbolName)
+                            .sort((a, b) => {
+                                const aCurrentFile = a.filePath === activeFile ? -1 : 0;
+                                const bCurrentFile = b.filePath === activeFile ? -1 : 0;
+                                return aCurrentFile - bCurrentFile || a.filePath.localeCompare(b.filePath) || a.name.localeCompare(b.name);
+                            });
+
+                        if (!candidates.length) {
+                            vscode.window.showInformationMessage(
+                                `DevLens: No analyzed symbol named "${symbolName}" was found.`
+                            );
+                            return;
+                        }
+
+                        if (candidates.length === 1 && hasSelectedName) {
+                            symbolId = candidates[0].id;
+                        } else {
+                            const choice = await vscode.window.showQuickPick(
+                                candidates.map(symbol => ({
+                                    label: symbol.name,
+                                    description: `${symbol.kind} · ${symbol.filePath}:${symbol.line}`,
+                                    detail: symbol.isExported ? 'Exported symbol' : undefined,
+                                    symbolId: symbol.id
+                                })),
+                                {
+                                    title: 'DevLens: Why Is This Code Here?',
+                                    placeHolder: hasSelectedName
+                                        ? `Choose the ${symbolName} symbol to explain`
+                                        : 'Select a function, class, method, or variable to explain'
+                                }
+                            );
+                            symbolId = choice?.symbolId;
+                        }
+                    }
+
+                    if (!symbolId) {
+                        return;
+                    }
+
                     const relationships = getSymbolRelationships(
                         relationshipGraph,
                         symbolId
                     );
-                    if (relationships) showRelationshipPanel(relationships, workspace.uri);
+                    if (relationships) {
+                        showRelationshipPanel(relationships, workspace.uri);
+                    }
                 }
             );
         } catch (error) {
@@ -469,16 +540,8 @@ const analyzeImpactCommand = vscode.commands.registerCommand(
                     cancellable: false
                 },
                 async () => {
-                    const project = await scanProject(workspace.uri);
-                    const filePaths = project.files.map(file => file.relativePath);
-                    const [imports, ast] = await Promise.all([
-                        analyzeImportsAndExports(workspace.uri, filePaths),
-                        analyzeAst(workspace.uri, filePaths)
-                    ]);
-                    const relationshipGraph = buildRelationshipGraph(
-                        ast,
-                        buildDependencyGraph(imports, filePaths)
-                    );
+                    const snapshot = await analysisCache.getSnapshot(workspace.uri, false, getDevLensConfig().exclude);
+                    const relationshipGraph = snapshot.relationshipGraph;
                     const hasSelectedName = /^[A-Za-z_$][\w$]*$/.test(symbolName);
                     const candidates = relationshipGraph.symbols
                         .filter(symbol => !hasSelectedName || symbol.name === symbolName)
@@ -545,9 +608,8 @@ const detectArchitectureCommand = vscode.commands.registerCommand(
                     cancellable: false
                 },
                 async () => {
-                    const project = await scanProject(workspace.uri);
-                    const architecture = await detectArchitecture(workspace.uri, project);
-                    showArchitectureDetectionPanel(architecture);
+                    const snapshot = await analysisCache.getSnapshot(workspace.uri, false, getDevLensConfig().exclude);
+                    showArchitectureDetectionPanel(snapshot.architecture);
                 }
             );
         } catch (error) {
@@ -588,17 +650,9 @@ const traceFlowCommand = vscode.commands.registerCommand(
                     cancellable: false
                 },
                 async () => {
-                    const project = await scanProject(workspace.uri);
-                    const filePaths = project.files.map(file => file.relativePath);
-                    const [imports, ast, http] = await Promise.all([
-                        analyzeImportsAndExports(workspace.uri, filePaths),
-                        analyzeAst(workspace.uri, filePaths),
-                        analyzeHttp(workspace.uri, filePaths)
-                    ]);
-                    const relationshipGraph = buildRelationshipGraph(
-                        ast,
-                        buildDependencyGraph(imports, filePaths)
-                    );
+                    const snapshot = await analysisCache.getSnapshot(workspace.uri, false, getDevLensConfig().exclude);
+                    const relationshipGraph = snapshot.relationshipGraph;
+                    const http = snapshot.http;
                     const hasSelectedName = /^[A-Za-z_$][\w$]*$/.test(symbolName);
                     const candidates = relationshipGraph.symbols
                         .filter(symbol => !hasSelectedName || symbol.name === symbolName)
@@ -635,7 +689,7 @@ const traceFlowCommand = vscode.commands.registerCommand(
                     }
                     if (!symbolId) return;
 
-                    const trace = traceFlow(relationshipGraph, symbolId, http);
+                    const trace = traceFlow(relationshipGraph, symbolId, http, getDevLensConfig().traceMaxDepth);
                     if (trace) showFlowPanel(trace, workspace.uri);
                 }
             );
