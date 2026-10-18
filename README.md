@@ -7,9 +7,11 @@ DevLens is a Visual Studio Code extension that helps developers understand an un
 ## Highlights
 
 - **Project overview dashboard** with file statistics, language breakdown, configuration files, detected technologies, and connected modules.
+![alt text](image-1.png)
 - **Deep code intelligence** for TypeScript and JavaScript using AST-based analysis.
 - **Code relationship analysis** for exploring symbols, callers, dependencies, and references.
 - **Impact analysis** to investigate code that may be affected by changes.
+![alt text](resources/media/impact.gif)
 - **Architecture visualization** to explore file-level dependencies and project structure.
 - **Flow tracing** that connects supported HTTP client calls to recognized backend routes.
 - **Framework and technology detection** based on dependencies, configuration files, and lockfiles.
