@@ -3,7 +3,7 @@
   "displayName": "DevLens: Visualize And Understand your Project Architecture",
   "description": "Understand your codebase through architecture and code relationships.",
   "publisher": "AbhishekShukla",
-  "version": "0.0.1",
+  "version": "1.0.1",
   "engines": {
     "vscode": "^1.140.0"
   },
