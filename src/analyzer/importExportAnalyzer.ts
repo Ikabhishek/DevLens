@@ -38,6 +38,15 @@ function normalizeRelativePath(filePath: string): string {
     return path.posix.normalize(filePath.replace(/\\/g, '/'));
 }
 
+const SCRIPT_EXTENSIONS = new Set([
+    '.ts', '.tsx', '.js', '.jsx', '.mts', '.cts', '.mjs', '.cjs'
+]);
+const STYLESHEET_EXTENSIONS = new Set(['.css', '.scss', '.sass', '.less']);
+
+function lineOf(text: string, index: number): number {
+    return text.slice(0, index).split('\n').length;
+}
+
 
 function getImportNames(node: ts.ImportDeclaration): string[] {
     const source = ts.isStringLiteral(node.moduleSpecifier)
@@ -96,7 +105,7 @@ function resolveLocalImport(
     const extensions = [
         '.ts', '.tsx', '.js', '.jsx',
         '.mts', '.cts', '.mjs', '.cjs',
-        '.json', '.css', '.scss', '.sass', '.less'
+        '.json', '.html', '.htm', '.css', '.scss', '.sass', '.less'
     ];
 
     const indexFiles = extensions.map(ext =>
@@ -112,12 +121,87 @@ function resolveLocalImport(
     return candidates.find(candidate => knownFiles.has(candidate));
 }
 
+function addLocalReference(
+    moduleInfo: FileModuleInfo,
+    unresolvedImports: ImportExportAnalysis['unresolvedImports'],
+    source: string,
+    importedNames: string[],
+    line: number,
+    relativePath: string,
+    knownFiles: Set<string>
+): void {
+    if (!source || source.startsWith('#') || /^(?:https?:|data:|\/\/)/i.test(source)) return;
+    const cleanSource = source.split(/[?#]/, 1)[0];
+    const resolvedPath = cleanSource.startsWith('/')
+        ? normalizeRelativePath(cleanSource.slice(1))
+        : resolveLocalImport(cleanSource.startsWith('.') ? cleanSource : `./${cleanSource}`, relativePath, knownFiles);
+    const localPath = resolvedPath && knownFiles.has(resolvedPath)
+        ? resolvedPath
+        : undefined;
+    moduleInfo.imports.push({
+        source,
+        resolvedPath: localPath,
+        importedNames,
+        isTypeOnly: false,
+        isExternal: false,
+        line
+    });
+    if (!localPath) {
+        unresolvedImports.push({ filePath: relativePath, source, line });
+    }
+}
+
+function analyzeHtmlReferences(
+    sourceText: string,
+    moduleInfo: FileModuleInfo,
+    unresolvedImports: ImportExportAnalysis['unresolvedImports'],
+    relativePath: string,
+    knownFiles: Set<string>
+): void {
+    const referencePattern = /<(script|link)\b[^>]*>/gi;
+    for (const match of sourceText.matchAll(referencePattern)) {
+        const tag = match[0];
+        const tagName = match[1].toLowerCase();
+        const sourceMatch = tagName === 'script'
+            ? /\bsrc\s*=\s*(["'])(.*?)\1/i.exec(tag)
+            : /\bhref\s*=\s*(["'])(.*?)\1/i.exec(tag);
+        if (!sourceMatch) continue;
+        if (tagName === 'link' && !/\brel\s*=\s*(["'])stylesheet\1/i.test(tag)) continue;
+        addLocalReference(
+            moduleInfo,
+            unresolvedImports,
+            sourceMatch[2],
+            [tagName === 'script' ? 'script' : 'stylesheet'],
+            lineOf(sourceText, match.index ?? 0),
+            relativePath,
+            knownFiles
+        );
+    }
+}
+
+function analyzeStylesheetReferences(
+    sourceText: string,
+    moduleInfo: FileModuleInfo,
+    unresolvedImports: ImportExportAnalysis['unresolvedImports'],
+    relativePath: string,
+    knownFiles: Set<string>
+): void {
+    const importPattern = /@import\s+(?:url\(\s*)?["']([^"']+)["']\s*\)?/gi;
+    for (const match of sourceText.matchAll(importPattern)) {
+        addLocalReference(
+            moduleInfo, unresolvedImports, match[1], ['stylesheet'],
+            lineOf(sourceText, match.index ?? 0), relativePath, knownFiles
+        );
+    }
+}
+
 export async function analyzeImportsAndExports(
     root: vscode.Uri,
-    relativePaths: string[]
+    relativePaths: string[],
+    knownRelativePaths: string[] = relativePaths
 ): Promise<ImportExportAnalysis> {
     const normalizedPaths = relativePaths.map(normalizeRelativePath);
-    const knownFiles = new Set(normalizedPaths);
+    const knownFiles = new Set(knownRelativePaths.map(normalizeRelativePath));
 
     const modules: FileModuleInfo[] = [];
     const unresolvedImports: ImportExportAnalysis['unresolvedImports'] = [];
@@ -125,10 +209,9 @@ export async function analyzeImportsAndExports(
     for (const relativePath of normalizedPaths) {
         const extension = path.posix.extname(relativePath).toLowerCase();
 
-        if (![
-            '.ts', '.tsx', '.js', '.jsx',
-            '.mts', '.cts', '.mjs', '.cjs'
-        ].includes(extension)) {
+        if (!SCRIPT_EXTENSIONS.has(extension) &&
+            extension !== '.html' && extension !== '.htm' &&
+            !STYLESHEET_EXTENSIONS.has(extension)) {
             continue;
         }
 
@@ -167,6 +250,17 @@ export async function analyzeImportsAndExports(
             imports: [],
             exports: []
         };
+
+        if (extension === '.html' || extension === '.htm') {
+            analyzeHtmlReferences(sourceText, moduleInfo, unresolvedImports, relativePath, knownFiles);
+            modules.push(moduleInfo);
+            continue;
+        }
+        if (STYLESHEET_EXTENSIONS.has(extension)) {
+            analyzeStylesheetReferences(sourceText, moduleInfo, unresolvedImports, relativePath, knownFiles);
+            modules.push(moduleInfo);
+            continue;
+        }
 
         function visit(node: ts.Node): void {
             const line =

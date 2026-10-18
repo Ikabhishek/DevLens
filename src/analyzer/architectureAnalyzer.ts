@@ -116,6 +116,20 @@ export async function detectArchitecture(
         }
     }
 
+    const hasHtml = project.files.some(file => ['.html', '.htm'].includes(file.extension));
+    const hasBrowserCode = project.files.some(file => ['.js', '.mjs', '.cjs'].includes(file.extension));
+    const hasStyles = project.files.some(file => ['.css', '.scss', '.sass', '.less'].includes(file.extension));
+    if (hasHtml && (hasBrowserCode || hasStyles)) {
+        const key = 'frontend:HTML, CSS & JavaScript';
+        if (!seen.has(key)) {
+            components.push({
+                category: 'frontend',
+                name: 'HTML, CSS & JavaScript',
+                evidence: 'Local HTML entry files with browser scripts or stylesheets'
+            });
+        }
+    }
+
     components.sort((a, b) =>
         a.category.localeCompare(b.category) || a.name.localeCompare(b.name)
     );

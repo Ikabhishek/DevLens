@@ -9,8 +9,9 @@ import { buildRelationshipGraph, RelationshipGraph } from '../graph/relationship
 import { ProjectFile, ProjectModel } from '../models/projectModel';
 import { CONFIG_FILES, IGNORED_DIRECTORIES, LANGUAGE_BY_EXTENSION, scanProject } from '../scanner/projectScanner';
 
-const CODE_EXTENSIONS = new Set([
-    '.ts', '.tsx', '.js', '.jsx', '.mts', '.cts', '.mjs', '.cjs'
+const ANALYZABLE_EXTENSIONS = new Set([
+    '.ts', '.tsx', '.js', '.jsx', '.mts', '.cts', '.mjs', '.cjs',
+    '.html', '.htm', '.css', '.scss', '.sass', '.less'
 ]);
 
 export interface AnalysisSnapshot {
@@ -104,7 +105,7 @@ export class AnalysisCache {
         this.cachedProject = project;
 
         const filePaths = project.files.map(file => file.relativePath);
-        const codeFiles = filePaths.filter(fp => CODE_EXTENSIONS.has(path.posix.extname(fp).toLowerCase()));
+        const codeFiles = filePaths.filter(fp => ANALYZABLE_EXTENSIONS.has(path.posix.extname(fp).toLowerCase()));
 
         const [imports, ast, http, architecture] = await Promise.all([
             analyzeImportsAndExports(workspaceUri, filePaths),
@@ -247,7 +248,7 @@ export class AnalysisCache {
                     this.cachedProject.totalFiles++;
                 }
 
-                if (CODE_EXTENSIONS.has(ext)) {
+                if (ANALYZABLE_EXTENSIONS.has(ext)) {
                     codeFilesToAnalyze.push(relPath);
                 }
             } catch {
@@ -268,7 +269,11 @@ export class AnalysisCache {
         // Incrementally analyze only the modified code files
         if (codeFilesToAnalyze.length > 0) {
             const [newImports, newAst, newHttp] = await Promise.all([
-                analyzeImportsAndExports(workspaceUri, codeFilesToAnalyze),
+                analyzeImportsAndExports(
+                    workspaceUri,
+                    codeFilesToAnalyze,
+                    this.cachedProject.files.map(file => file.relativePath)
+                ),
                 analyzeAst(workspaceUri, codeFilesToAnalyze),
                 analyzeHttp(workspaceUri, codeFilesToAnalyze)
             ]);

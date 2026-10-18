@@ -150,7 +150,8 @@ function getWebviewContent(data: DashboardData, logoUri: string, cspSource: stri
     ].filter(([count]) => Number(count) > 0)
         .map(([count, label]) => `${count} ${label}`).join(' · ');
     const sourceExtensions = new Set([
-        '.ts', '.tsx', '.js', '.jsx', '.mts', '.cts', '.mjs', '.cjs'
+        '.ts', '.tsx', '.js', '.jsx', '.mts', '.cts', '.mjs', '.cjs',
+        '.html', '.htm', '.css', '.scss', '.sass', '.less'
     ]);
     const isConfigFile = (file: string): boolean =>
         /(^|\/)(?:vite|webpack|eslint|prettier|jest|vitest|tailwind|postcss)\.config\./i.test(file);
@@ -164,6 +165,8 @@ function getWebviewContent(data: DashboardData, logoUri: string, cspSource: stri
         const normalized = file.toLowerCase();
         const baseName = path.posix.basename(normalized);
         if (/(^|\/)(components?|widgets?)(\/|$)/.test(normalized) || /\.component\.(ts|tsx|js|jsx)$/.test(baseName)) return 'component';
+        if (/\.(html|htm)$/.test(baseName)) return 'page';
+        if (/\.(css|scss|sass|less)$/.test(baseName)) return 'utility';
         if (/(^|\/)(pages?|views?|routes?)(\/|$)/.test(normalized) || /^(app|main|index)\.(tsx|jsx|ts|js)$/.test(baseName)) return 'page';
         if (/(^|\/)(services?|utils?|helpers?|lib|controllers?|models?|schemas?)(\/|$)/.test(normalized) ||
             /\.(service|controller|model|schema)\.(ts|tsx|js|jsx)$/.test(baseName) ||

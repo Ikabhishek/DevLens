@@ -69,7 +69,8 @@ function getWebviewContent(
     architecture: ArchitectureModel
 ): string {
     const sourceExtensions = new Set([
-        '.ts', '.tsx', '.js', '.jsx', '.mts', '.cts', '.mjs', '.cjs'
+        '.ts', '.tsx', '.js', '.jsx', '.mts', '.cts', '.mjs', '.cjs',
+        '.html', '.htm', '.css', '.scss', '.sass', '.less'
     ]);
     const isToolConfig = (file: string): boolean =>
         /(^|\/)(?:vite|webpack|eslint|prettier|jest|vitest|tailwind|postcss)\.config\./i.test(file);
