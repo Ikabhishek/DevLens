@@ -119,7 +119,15 @@ export async function detectArchitecture(
     const hasHtml = project.files.some(file => ['.html', '.htm'].includes(file.extension));
     const hasBrowserCode = project.files.some(file => ['.js', '.mjs', '.cjs'].includes(file.extension));
     const hasStyles = project.files.some(file => ['.css', '.scss', '.sass', '.less'].includes(file.extension));
-    if (hasHtml && (hasBrowserCode || hasStyles)) {
+    const hasFrontendFramework = [
+        'react',
+        'react-dom',
+        'vue',
+        '@angular/core',
+        'svelte',
+        'next'
+    ].some(dependency => dependencies.has(dependency));
+    if (!hasFrontendFramework && hasHtml && (hasBrowserCode || hasStyles)) {
         const key = 'frontend:HTML, CSS & JavaScript';
         if (!seen.has(key)) {
             components.push({
