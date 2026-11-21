@@ -10,12 +10,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 - Broader framework and language analysis coverage.
 
-## [1.0.2] - 2026-10-19
+## [1.0.4] - 2026-11-21
 
 ### Added
 
 - Project dashboard in the VS Code editor area with live workspace statistics, language breakdown, project metadata, and quick access to DevLens analysis tools.
+- Downloadable PDF project report with workspace statistics, languages, detected architecture, analysis totals, and the most connected modules.
 - Interactive architecture graph with file search, zoom, fit-to-screen, pan, layout options, dependency highlighting, node selection, edge inspection, and direct file opening.
+- Graph motion for dashboard architecture maps: staggered node and edge entry, selected-node pulse, and animated dependency-flow edges.
 - File-level dependency analysis for TypeScript, JavaScript, React, Angular, HTML, and stylesheet files.
 - HTML and CSS project support:
   - Resolves local HTML script and stylesheet references.
@@ -42,6 +44,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 - Removed an SVG edge fill that could render as black shapes in the architecture graph.
 - Preserved the complete project file set during incremental dependency resolution.
+- Detect frameworks across nested package manifests, including repositories with separate frontend and backend packages.
 
-[Unreleased]: https://github.com/Ikabhishek/DevLens/compare/v1.0.2...HEAD
-[1.0.2]: https://github.com/Ikabhishek/DevLens/releases/tag/v1.0.2
+[Unreleased]: https://github.com/Ikabhishek/DevLens/compare/v1.0.3...HEAD
+[1.0.3]: https://github.com/Ikabhishek/DevLens/releases/tag/v1.0.3

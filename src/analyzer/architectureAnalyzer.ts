@@ -61,24 +61,30 @@ export async function detectArchitecture(
     project: ProjectModel
 ): Promise<ArchitectureModel> {
     const components: ArchitectureComponent[] = [];
-    const packageFile = project.files.find(file => file.relativePath === 'package.json');
-    let packageJson: PackageJson | undefined;
+    const packageFiles = project.files.filter(file => file.name === 'package.json');
+    const dependencySources = new Map<string, string[]>();
 
-    if (packageFile) {
+    await Promise.all(packageFiles.map(async packageFile => {
         try {
             const content = await vscode.workspace.fs.readFile(
-                vscode.Uri.joinPath(root, 'package.json')
+                vscode.Uri.joinPath(root, ...packageFile.relativePath.split('/'))
             );
-            packageJson = JSON.parse(Buffer.from(content).toString('utf8')) as PackageJson;
+            const packageJson = JSON.parse(Buffer.from(content).toString('utf8')) as PackageJson;
+            const manifestLabel = packageFile.relativePath;
+            for (const dependency of [
+                ...Object.keys(packageJson.dependencies ?? {}),
+                ...Object.keys(packageJson.devDependencies ?? {})
+            ]) {
+                const sources = dependencySources.get(dependency) ?? [];
+                sources.push(manifestLabel);
+                dependencySources.set(dependency, sources);
+            }
         } catch {
             // A malformed package file should not prevent other detection.
         }
-    }
+    }));
 
-    const dependencies = new Set([
-        ...Object.keys(packageJson?.dependencies ?? {}),
-        ...Object.keys(packageJson?.devDependencies ?? {})
-    ]);
+    const dependencies = new Set(dependencySources.keys());
     const seen = new Set<string>();
     for (const component of COMPONENTS) {
         if (!dependencies.has(component.dependency)) continue;
@@ -88,7 +94,7 @@ export async function detectArchitecture(
         components.push({
             category: component.category,
             name: component.name,
-            evidence: `package.json dependency: ${component.dependency}`
+            evidence: `${dependencySources.get(component.dependency)?.join(', ') ?? 'package.json'} dependency: ${component.dependency}`
         });
     }
 
@@ -105,7 +111,7 @@ export async function detectArchitecture(
         }
     }
 
-    if (project.configFiles.includes('vite.config.ts') || project.configFiles.includes('vite.config.js')) {
+    if (project.files.some(file => file.name === 'vite.config.ts' || file.name === 'vite.config.js')) {
         const key = 'build-tool:Vite';
         if (!seen.has(key)) {
             components.push({

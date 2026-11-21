@@ -12,6 +12,119 @@ export interface DashboardData {
     architecture: ArchitectureModel;
 }
 
+function reportLines(data: DashboardData): string[] {
+    const languageLines = Object.entries(data.project.languageCounts)
+        .sort(([, left], [, right]) => right - left)
+        .map(([language, count]) => `  • ${language}: ${count} files`);
+    const architectureLines = data.architecture.components.length
+        ? data.architecture.components.map(component =>
+            `  • ${component.name} (${component.category}) — ${component.evidence}`
+        )
+        : ['  • No recognised technologies detected.'];
+    const dependencyLines = mostConnected(data.graph).length
+        ? mostConnected(data.graph).map(item =>
+            `  • ${item.file}: ${item.count} local connections`
+        )
+        : ['  • No resolved local dependencies found.'];
+
+    return [
+        'DEVLENS PROJECT REPORT',
+        `Project: ${data.project.name}`,
+        `Generated: ${new Date().toLocaleString()}`,
+        '',
+        'WORKSPACE SUMMARY',
+        `Files: ${data.project.totalFiles}`,
+        `Folders: ${data.project.totalFolders}`,
+        `Total size: ${data.project.totalSizeBytes >= 1024 * 1024
+            ? `${(data.project.totalSizeBytes / (1024 * 1024)).toFixed(1)} MB`
+            : `${Math.max(1, Math.round(data.project.totalSizeBytes / 1024))} KB`}`,
+        `Configuration files: ${data.project.configFiles.length}`,
+        '',
+        'LANGUAGES',
+        ...languageLines,
+        '',
+        'DETECTED ARCHITECTURE',
+        ...architectureLines,
+        '',
+        'CODE ANALYSIS',
+        `Functions: ${data.ast.totals.functions}`,
+        `Classes: ${data.ast.totals.classes}`,
+        `Methods: ${data.ast.totals.methods}`,
+        `Variables: ${data.ast.totals.variables}`,
+        `Function calls: ${data.ast.totals.calls}`,
+        `Local dependencies: ${data.graph.edges.length}`,
+        '',
+        'MOST CONNECTED MODULES',
+        ...dependencyLines
+    ];
+}
+
+function wrapPdfLine(line: string, limit = 92): string[] {
+    if (line.length <= limit) return [line];
+    const result: string[] = [];
+    let remaining = line;
+    while (remaining.length > limit) {
+        const breakAt = remaining.lastIndexOf(' ', limit);
+        const index = breakAt > 0 ? breakAt : limit;
+        result.push(remaining.slice(0, index));
+        remaining = remaining.slice(index).trimStart();
+    }
+    result.push(remaining);
+    return result;
+}
+
+function escapePdfText(value: string): string {
+    return value
+        .replace(/[^\x20-\x7e]/g, '?')
+        .replace(/\\/g, '\\\\')
+        .replace(/\(/g, '\\(')
+        .replace(/\)/g, '\\)');
+}
+
+function createProjectReportPdf(data: DashboardData): Uint8Array {
+    const lines = reportLines(data).flatMap(line => wrapPdfLine(line));
+    const linesPerPage = 43;
+    const pages = Array.from(
+        { length: Math.max(1, Math.ceil(lines.length / linesPerPage)) },
+        (_, index) => lines.slice(index * linesPerPage, (index + 1) * linesPerPage)
+    );
+    const objects: string[] = [];
+    const pageReferences = pages.map((_, index) => `${4 + index * 2} 0 R`);
+    objects[1] = '<< /Type /Catalog /Pages 2 0 R >>';
+    objects[2] = `<< /Type /Pages /Kids [${pageReferences.join(' ')}] /Count ${pages.length} >>`;
+    objects[3] = '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>';
+
+    pages.forEach((pageLines, index) => {
+        const pageObject = 4 + index * 2;
+        const contentObject = pageObject + 1;
+        const content = [
+            'BT',
+            '/F1 16 Tf',
+            '50 800 Td',
+            `(${escapePdfText(pageLines[0] ?? 'DevLens Project Report')}) Tj`,
+            '/F1 10 Tf',
+            ...pageLines.slice(1).flatMap(line => ['0 -17 Td', `(${escapePdfText(line)}) Tj`]),
+            'ET'
+        ].join('\n');
+        objects[pageObject] = `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 842] /Resources << /Font << /F1 3 0 R >> >> /Contents ${contentObject} 0 R >>`;
+        objects[contentObject] = `<< /Length ${Buffer.byteLength(content, 'ascii')} >>\nstream\n${content}\nendstream`;
+    });
+
+    let pdf = '%PDF-1.4\n';
+    const offsets: number[] = [0];
+    for (let index = 1; index < objects.length; index++) {
+        offsets[index] = Buffer.byteLength(pdf, 'ascii');
+        pdf += `${index} 0 obj\n${objects[index]}\nendobj\n`;
+    }
+    const xrefOffset = Buffer.byteLength(pdf, 'ascii');
+    pdf += `xref\n0 ${objects.length}\n0000000000 65535 f \n`;
+    for (let index = 1; index < objects.length; index++) {
+        pdf += `${String(offsets[index]).padStart(10, '0')} 00000 n \n`;
+    }
+    pdf += `trailer\n<< /Size ${objects.length} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`;
+    return Buffer.from(pdf, 'ascii');
+}
+
 let activeDashboardInstance: { panel: vscode.WebviewPanel; render: () => Promise<void> } | undefined;
 
 export function refreshActiveDashboard(): void {
@@ -73,6 +186,24 @@ export async function showDashboard(
             } catch (error) {
                 const details = error instanceof Error ? error.message : String(error);
                 vscode.window.showErrorMessage(`DevLens dashboard refresh failed: ${details}`);
+            }
+            return;
+        }
+        if (message.command === 'downloadReport') {
+            const reportData = await loadDashboard();
+            const fileName = `${reportData.project.name.replace(/[^a-z0-9_-]/gi, '-') || 'project'}-devlens-report.pdf`;
+            const destination = await vscode.window.showSaveDialog({
+                defaultUri: vscode.Uri.joinPath(rootUri, fileName),
+                filters: { 'PDF documents': ['pdf'] },
+                saveLabel: 'Download report'
+            });
+            if (!destination) return;
+            try {
+                await vscode.workspace.fs.writeFile(destination, createProjectReportPdf(reportData));
+                vscode.window.showInformationMessage(`DevLens: Project report saved to ${destination.fsPath}`);
+            } catch (error) {
+                const details = error instanceof Error ? error.message : String(error);
+                vscode.window.showErrorMessage(`DevLens could not save the project report: ${details}`);
             }
             return;
         }
@@ -209,8 +340,9 @@ body { margin: 0; padding: 24px 28px 40px; color: var(--vscode-foreground); back
 .hero { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 22px 24px; border: 1px solid var(--vscode-panel-border); border-radius: 14px; background: linear-gradient(120deg, color-mix(in srgb, var(--vscode-focusBorder) 15%, var(--vscode-editor-background)), var(--vscode-editor-background)); margin-bottom: 14px; }
 .brand { display: flex; gap: 16px; align-items: center; } .logo { display: grid; place-items: center; width: 56px; height: 56px; padding: 4px; border: 0; border-radius: 0; background: transparent; } .logo img { width: 100%; height: 100%; filter: invert(1); }
 h1 { margin: 0; font-size: 24px; } h2 { font-size: 16px; margin: 0 0 12px; } p { margin: 6px 0 0; } .muted { color: var(--vscode-descriptionForeground); }
-.project-meta { text-align: right; } .project-meta strong { font-size: 16px; } button { font: inherit; cursor: pointer; }
+.project-meta { text-align: right; } .project-meta strong { font-size: 16px; } .hero-actions { display: flex; justify-content: flex-end; gap: 8px; } button { font: inherit; cursor: pointer; }
 .refresh { border: 0; padding: 8px 14px; border-radius: 6px; color: var(--vscode-button-foreground); background: var(--vscode-button-background); margin-top: 10px; font-weight: 500; } .refresh:hover { background: var(--vscode-button-hoverBackground); }
+.report-download { border: 1px solid var(--vscode-button-border, var(--vscode-focusBorder)); padding: 8px 14px; border-radius: 6px; color: var(--vscode-button-secondaryForeground, var(--vscode-foreground)); background: var(--vscode-button-secondaryBackground, var(--vscode-editor-background)); margin-top: 10px; font-weight: 500; } .report-download:hover { background: var(--vscode-button-secondaryHoverBackground, var(--vscode-list-hoverBackground)); }
 .stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 10px 0; } .stat { padding: 10px 12px; border: 1px solid var(--vscode-panel-border); border-radius: 8px; background: var(--vscode-editor-background); } .stat strong { display: block; font-size: 20px; color: var(--vscode-textLink-foreground); } .stat span { color: var(--vscode-descriptionForeground); font-size: 12px; }
 .grid { display: grid; grid-template-columns: minmax(280px, 1fr) minmax(280px, 1fr); gap: 14px; } .panel { border: 1px solid var(--vscode-panel-border); border-radius: 10px; padding: 16px; background: var(--vscode-sideBar-background); min-width: 0; }
 .language-layout { display: flex; align-items: center; gap: 24px; } .donut { width: 138px; height: 138px; flex: 0 0 auto; display: grid; place-items: center; border-radius: 50%; background: conic-gradient(${segments || '#64748b 0 100%'}); } .donut::after { content: '${data.project.totalFiles}\\A Files'; white-space: pre; display: grid; place-items: center; width: 94px; height: 94px; border-radius: 50%; background: var(--vscode-sideBar-background); text-align: center; font-size: 13px; font-weight: 600; }
@@ -225,17 +357,19 @@ ul { margin: 0; padding-left: 18px; } li { margin: 8px 0; } .file-link { border:
 .pill-badge { font-size: 10px; opacity: .75; min-width: 14px; text-align: center; }
 #architecture-graph { display: block; width: 100%; height: 500px; margin-top: 10px; border-radius: 8px; background: var(--vscode-editor-background); cursor: grab; } #architecture-graph:active { cursor: grabbing; } .graph-legend { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 10px; font-size: 11px; color: var(--vscode-descriptionForeground); } .graph-legend span { display: inline-flex; align-items: center; gap: 6px; } .legend-dot { width: 9px; height: 9px; border-radius: 3px; display: inline-block; }
 .graph-controls { display: flex; align-items: center; gap: 6px; margin-top: 8px; flex-wrap: wrap; } .graph-controls input { flex: 1; min-width: 120px; padding: 6px 9px; color: var(--vscode-input-foreground); background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius: 6px; font-size: 12px; } .graph-controls button { padding: 5px 9px; color: var(--vscode-button-secondaryForeground, var(--vscode-foreground)); background: var(--vscode-button-secondaryBackground, var(--vscode-editor-background)); border: 1px solid var(--vscode-panel-border); border-radius: 6px; font-size: 12px; } .graph-controls button.active { color: var(--vscode-button-foreground); background: var(--vscode-button-background); border-color: var(--vscode-focusBorder); } button:focus-visible, input:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
-.graph-node { cursor: pointer; } .graph-node:hover rect { stroke: var(--vscode-focusBorder); stroke-width: 3; } .graph-node.selected rect { stroke: var(--vscode-focusBorder); stroke-width: 4; } .graph-node.dimmed, .graph-edge.dimmed { opacity: .14; } .graph-edge { cursor: pointer; pointer-events: stroke; opacity: .8; } .graph-edge:hover, .graph-edge.highlighted { stroke-width: 4; opacity: 1; }
+.graph-node { cursor: pointer; animation: graph-node-enter .32s ease-out both; animation-delay: var(--enter-delay, 0ms); } .graph-node:hover rect { stroke: var(--vscode-focusBorder); stroke-width: 3; } .graph-node.selected rect { stroke: var(--vscode-focusBorder); stroke-width: 4; animation: graph-node-pulse 1.6s ease-in-out infinite; } .graph-node.dimmed, .graph-edge.dimmed { opacity: .14; } .graph-edge { cursor: pointer; pointer-events: stroke; opacity: .8; animation: graph-edge-enter .28s ease-out both; animation-delay: var(--enter-delay, 0ms); } .graph-edge:hover, .graph-edge.highlighted { stroke-width: 4; opacity: 1; } .graph-edge.flowing { stroke-dasharray: 8 8; stroke-width: 4; opacity: 1; animation: graph-flow 1.1s linear infinite; }
+@keyframes graph-node-enter { from { opacity: 0; } to { opacity: 1; } } @keyframes graph-edge-enter { from { opacity: 0; } to { opacity: .8; } } @keyframes graph-node-pulse { 50% { filter: brightness(1.35); } } @keyframes graph-flow { to { stroke-dashoffset: -32; } }
+@media (prefers-reduced-motion: reduce) { .graph-node, .graph-edge, .graph-node.selected rect, .graph-edge.flowing { animation: none; } }
 .detail-card { height: 100%; } .detail-card h2 { margin-bottom: 4px; } .detail-empty { color: var(--vscode-descriptionForeground); font-size: 13px; line-height: 1.5; } .detail-row { display: flex; justify-content: space-between; gap: 12px; padding: 7px 0; border-bottom: 1px solid var(--vscode-panel-border); font-size: 12px; } .detail-row span:first-child { color: var(--vscode-descriptionForeground); } .detail-path { overflow-wrap: anywhere; margin: 9px 0; font-size: 12px; font-weight: 600; } .detail-actions { display: flex; gap: 6px; margin: 10px 0; flex-wrap: wrap; } .detail-actions button { border: 1px solid var(--vscode-panel-border); border-radius: 5px; color: var(--vscode-foreground); background: var(--vscode-editor-background); padding: 5px 8px; }
 .actions { margin-top: 14px; } .action-grid { display: grid; grid-template-columns: repeat(2, minmax(200px, 1fr)); gap: 10px; } .action-card { display: flex; gap: 12px; align-items: center; width: 100%; min-height: 74px; border: 1px solid var(--vscode-panel-border); border-radius: 9px; padding: 12px; color: var(--vscode-foreground); background: var(--vscode-sideBar-background); text-align: left; } .action-card:hover { border-color: var(--vscode-focusBorder); background: var(--vscode-list-hoverBackground); } .action-icon { width: 30px; font-size: 22px; color: var(--vscode-textLink-foreground); text-align: center; } .action-card strong, .action-card small { display: block; } .action-card small { color: var(--vscode-descriptionForeground); margin-top: 4px; } .action-arrow { margin-left: auto; font-size: 26px; color: var(--vscode-descriptionForeground); }
-@media (max-width: 900px) { body { padding: 16px; } .hero { align-items: flex-start; flex-direction: column; gap: 12px; } .project-meta { text-align: left; } .workspace-grid, .grid { grid-template-columns: 1fr; } #architecture-graph { height: 400px; } .action-grid { grid-template-columns: 1fr; } }
+@media (max-width: 900px) { body { padding: 16px; } .hero { align-items: flex-start; flex-direction: column; gap: 12px; } .project-meta { text-align: left; } .hero-actions { justify-content: flex-start; } .workspace-grid, .grid { grid-template-columns: 1fr; } #architecture-graph { height: 400px; } .action-grid { grid-template-columns: 1fr; } }
 </style></head><body><main class="shell">
 <nav class="breadcrumb">
   <span>DevLens</span>
   <span class="bc-sep">›</span>
   <span class="bc-current">Project Architecture & Dashboard</span>
 </nav>
-<section class="hero"><div class="brand"><div class="logo"><img src="${escapeHtml(logoUri)}" alt="DevLens"></div><div><h1>DevLens</h1><p class="muted">Understand your codebase through architecture and code relationships.</p></div></div><div class="project-meta"><strong>${escapeHtml(data.project.name)}</strong><p class="muted">Last scanned: ${escapeHtml(date)}</p><button class="refresh" id="refresh">Refresh dashboard</button></div></section>
+<section class="hero"><div class="brand"><div class="logo"><img src="${escapeHtml(logoUri)}" alt="DevLens"></div><div><h1>DevLens</h1><p class="muted">Understand your codebase through architecture and code relationships.</p></div></div><div class="project-meta"><strong>${escapeHtml(data.project.name)}</strong><p class="muted">Last scanned: ${escapeHtml(date)}</p><div class="hero-actions"><button class="report-download" id="download-report">Download PDF report</button><button class="refresh" id="refresh">Refresh dashboard</button></div></div></section>
 <section class="workspace-grid"><article class="architecture"><div class="architecture-heading"><div><h2>Code architecture</h2><p class="muted">Resolved imports · select a node or edge · drag to pan</p></div><span class="muted">${graphData.nodes.length} connected files</span></div><div class="category-filters"><button class="filter-pill active" data-category="all">All <span class="pill-badge">${categoryCounts.all}</span></button><button class="filter-pill" data-category="component"><i class="legend-dot" style="background:#2dd4bf"></i>Components <span class="pill-badge">${categoryCounts.component}</span></button><button class="filter-pill" data-category="page"><i class="legend-dot" style="background:#38bdf8"></i>Pages / Entry <span class="pill-badge">${categoryCounts.page}</span></button><button class="filter-pill" data-category="utility"><i class="legend-dot" style="background:#fb923c"></i>Services / Utils <span class="pill-badge">${categoryCounts.utility}</span></button><button class="filter-pill" data-category="module"><i class="legend-dot" style="background:#a78bfa"></i>Modules <span class="pill-badge">${categoryCounts.module}</span></button></div><div class="graph-controls"><input id="graph-search" type="search" placeholder="Search files…" aria-label="Search files in graph"><button id="layout-toggle" title="Switch layout between Hierarchical Layers and Group by Type">Layout: Hierarchical</button><button id="zoom-out" title="Zoom out">−</button><button id="zoom-in" title="Zoom in">+</button><button id="fit-graph">Fit</button><button id="highlight-deps">Highlight dependencies</button></div><svg id="architecture-graph" role="img" aria-label="Interactive project architecture graph"></svg><div class="graph-legend"><span><i class="legend-dot" style="background:#2dd4bf"></i>Component</span><span><i class="legend-dot" style="background:#38bdf8"></i>Page / entry</span><span><i class="legend-dot" style="background:#fb923c"></i>Service / utility</span><span><i class="legend-dot" style="background:#a78bfa"></i>Module</span></div></article>
 <aside class="panel detail-card"><h2>File Structure</h2><p class="muted">Workspace overview</p><div class="stats"><div class="stat"><strong>${data.project.totalFiles}</strong><span>Files</span></div><div class="stat"><strong>${data.project.totalFolders}</strong><span>Folders</span></div><div class="stat"><strong>${formatSize(data.project.totalSizeBytes)}</strong><span>Total size</span></div><div class="stat"><strong>${visibleEdges.length}</strong><span>Dependencies</span></div></div><h2>Selected file</h2><div id="selected-file-details" class="detail-empty">Select a graph node to inspect its imports, dependents, language, and file size.</div><h2 style="margin-top:16px">Selected connection</h2><div id="selected-edge-details" class="detail-empty">Select an edge to see which symbols it imports.</div></aside></section>
 <section class="grid"><article class="panel"><h2>Languages</h2><div class="language-layout"><div class="donut"></div><div class="language-list">${languages.map(language => `<div class="language-row"><span class="color" style="background:${language.color}"></span><span>${escapeHtml(language.name)}</span><span>${language.count} (${language.percentage.toFixed(1)}%)</span></div>`).join('')}</div></div></article><article class="panel"><h2>Project analysis</h2><div class="stats"><div class="stat"><strong>${data.ast.totals.functions}</strong><span>Functions</span></div><div class="stat"><strong>${data.ast.totals.classes}</strong><span>Classes</span></div><div class="stat"><strong>${data.ast.totals.calls}</strong><span>Calls</span></div><div class="stat"><strong>${data.project.configFiles.length}</strong><span>Config files</span></div></div>${frameworkCoverage ? `<p class="muted">${escapeHtml(frameworkCoverage)}</p>` : ''}<h2>Detected technologies</h2><div class="chip-row">${architecture}</div></article><article class="panel"><h2>Configuration files</h2><ul>${configFiles}</ul></article><article class="panel"><h2>Most connected modules</h2><ul>${mostConnected(data.graph).map(item => `<li><button class="file-link" data-file="${escapeHtml(item.file)}">${escapeHtml(item.file)}</button> <span class="muted">${item.count} local connections</span></li>`).join('') || '<li class="muted">No local import connections yet.</li>'}</ul></article></section>
@@ -247,6 +381,7 @@ const graph = document.getElementById('architecture-graph');
 const colors = { component: '#2dd4bf', page: '#38bdf8', utility: '#fb923c', module: '#a78bfa' };
 const escapeXml = value => value.replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
 let selectedFile;
+let selectedEdge;
 let highlightDependencies = false;
 let activeCategory = 'all';
 let currentLayout = 'hierarchical';
@@ -255,6 +390,7 @@ const detailFile = document.getElementById('selected-file-details');
 const detailEdge = document.getElementById('selected-edge-details');
 const selectFile = file => {
     selectedFile = file;
+    selectedEdge = undefined;
     const node = graphData.nodes.find(item => item.id === file);
     if (!node) { return; }
     const outgoing = graphData.edges.filter(edge => edge.from === file);
@@ -272,9 +408,11 @@ const selectFile = file => {
 const selectEdge = index => {
     const edge = graphData.edges[index];
     if (!edge) { return; }
+    selectedEdge = index;
     const names = edge.names.length ? edge.names.map(escapeXml).join(', ') : 'Module import (no named symbols)';
     detailEdge.innerHTML = '<div class="detail-path">' + escapeXml(edge.from) + ' → ' + escapeXml(edge.to) + '</div><div class="detail-row"><span>Imported symbols</span><strong>' + names + '</strong></div><div class="detail-actions"><button id="open-edge-target">Open imported file</button></div>';
     detailEdge.querySelector('#open-edge-target').addEventListener('click', () => vscode.postMessage({ command: 'openFile', filePath: edge.to }));
+    updateSelection();
 };
 const updateSelection = () => {
     const searchInput = document.getElementById('graph-search');
@@ -296,7 +434,9 @@ const updateSelection = () => {
         const toNode = graphData.nodes.find(n => n.id === edge?.to);
         const related = Boolean(selectedFile && edge?.from === selectedFile);
         const matchesCategory = activeCategory === 'all' || fromNode?.category === activeCategory || toNode?.category === activeCategory;
-        edgeElement.classList.toggle('highlighted', highlightDependencies && related);
+        const isSelected = Number(edgeElement.dataset.edge) === selectedEdge;
+        edgeElement.classList.toggle('highlighted', (highlightDependencies && related) || isSelected);
+        edgeElement.classList.toggle('flowing', related || isSelected);
         const dim = !matchesCategory || (highlightDependencies && Boolean(selectedFile) && !related);
         edgeElement.classList.toggle('dimmed', dim);
     });
@@ -380,13 +520,13 @@ const renderArchitecture = () => {
         if (!from || !to || !target) { return ''; }
         const control = Math.max(36, Math.abs(to.y - from.y) / 2);
         const title = edge.names.length ? 'Imports: ' + edge.names.join(', ') : 'Imports module';
-        return '<path class="graph-edge" data-edge="' + index + '" d="M ' + from.x + ' ' + (from.y + 25) + ' C ' + from.x + ' ' + (from.y + control) + ', ' + to.x + ' ' + (to.y - control) + ', ' + to.x + ' ' + (to.y - 25) + '" stroke="' + colors[target.category] + '" fill="none" stroke-width="2" marker-end="url(#arrow-' + target.category + ')"><title>' + escapeXml(title) + '</title></path>';
+        return '<path class="graph-edge" data-edge="' + index + '" style="--enter-delay:' + Math.min(index * 26, 420) + 'ms" d="M ' + from.x + ' ' + (from.y + 25) + ' C ' + from.x + ' ' + (from.y + control) + ', ' + to.x + ' ' + (to.y - control) + ', ' + to.x + ' ' + (to.y - 25) + '" stroke="' + colors[target.category] + '" fill="none" stroke-width="2" marker-end="url(#arrow-' + target.category + ')"><title>' + escapeXml(title) + '</title></path>';
     }).join('');
-    const nodes = graphData.nodes.map(node => {
+    const nodes = graphData.nodes.map((node,index) => {
         const point = positions.get(node.id);
         if (!point) { return ''; }
         const label = node.label.length > 24 ? node.label.slice(0, 21) + '…' : node.label;
-        return '<g class="graph-node" data-file="' + escapeXml(node.id) + '" transform="translate(' + (point.x - 88) + ' ' + (point.y - 25) + ')" tabindex="0" role="button"><rect width="176" height="50" rx="8" fill="var(--vscode-sideBar-background)" stroke="' + colors[node.category] + '" stroke-width="2"></rect><text x="12" y="21" fill="' + colors[node.category] + '" font-size="11" font-weight="700">' + escapeXml(node.extension || 'FILE') + '</text><text x="44" y="32" fill="var(--vscode-foreground)" font-size="14">' + escapeXml(label) + '</text><title>Select ' + escapeXml(node.id) + '</title></g>';
+        return '<g class="graph-node" data-file="' + escapeXml(node.id) + '" style="--enter-delay:' + Math.min(index * 34, 510) + 'ms" transform="translate(' + (point.x - 88) + ' ' + (point.y - 25) + ')" tabindex="0" role="button"><rect width="176" height="50" rx="8" fill="var(--vscode-sideBar-background)" stroke="' + colors[node.category] + '" stroke-width="2"></rect><text x="12" y="21" fill="' + colors[node.category] + '" font-size="11" font-weight="700">' + escapeXml(node.extension || 'FILE') + '</text><text x="44" y="32" fill="var(--vscode-foreground)" font-size="14">' + escapeXml(label) + '</text><title>Select ' + escapeXml(node.id) + '</title></g>';
     }).join('');
 
     graph.setAttribute('viewBox', '0 0 ' + width + ' ' + height);
@@ -463,6 +603,7 @@ graph.addEventListener('wheel', event => {
     zoom(event.deltaY > 0 ? 1.12 : 0.89);
 }, { passive: false });
 document.getElementById('refresh').addEventListener('click', () => vscode.postMessage({command:'refresh'}));
+document.getElementById('download-report').addEventListener('click', () => vscode.postMessage({command:'downloadReport'}));
 document.querySelectorAll('.action-card').forEach(button => button.addEventListener('click', () => vscode.postMessage({command:'runFeature', feature:button.dataset.command})));
 document.querySelectorAll('.file-link').forEach(button => button.addEventListener('click', () => vscode.postMessage({command:'openFile', filePath:button.dataset.file})));
 </script></body></html>`;
