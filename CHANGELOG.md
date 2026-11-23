@@ -4,7 +4,26 @@ All notable changes to DevLens are documented in this file.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project uses [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.0.5] - 2026-11-23
+
+### Added
+
+- **Multi-Page Executive PDF Report Engine**: Complete architectural report generator producing structured, executive-grade PDF documents with vector graphics and rich codebase insights.
+- **Visual Code Architecture Diagram in PDF**: Dedicated vector diagram in the PDF report rendering a topological 4-tier dependency map (Entry & Pages, Components, Services, and Modules) with bezier connector curves and flow arrowheads.
+- **Critical Modules & Refactoring Impact Matrix**: Centrality analysis table in the PDF report displaying inbound/outbound connections, module roles, and color-coded impact risk badges (`HIGH RISK`, `MODERATE`, `LOW / LEAF`).
+- **DevLens Vector Logo Integration**: Embedded official DevLens vector logo in report headers, rendered as pure vector graphics.
+- **Language Composition Stacked Bar Chart**: Visual horizontal stacked bar chart in the PDF report displaying proportional language distribution with an accompanying color-coded legend grid.
+- **Actionable Architectural Insights**: Automated observations on refactoring precautions for critical hubs, component decoupling, and test coverage priorities.
+
+### Changed
+
+- Replaced previous plain-text PDF export with a 3-page styled PDF document featuring dark theme header banners, KPI metric cards, and clean typography.
+- Updated project scanner directory exclusions (`IGNORED_DIRECTORIES`) to ignore `.angular`, `.cache`, `.turbo`, `.output`, `.parcel-cache`, and `.vite` build directories.
+
+### Fixed
+
+- Resolved broken bullet point characters (`?`) in PDF reports caused by non-ASCII character sanitization by replacing them with native vector bullet elements.
+- Excluded internal build cache artifacts (such as `.angular/cache/...` chunks) from the most connected modules list and dependency graph analysis.
 
 ### Planned
 
@@ -46,5 +65,6 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - Preserved the complete project file set during incremental dependency resolution.
 - Detect frameworks across nested package manifests, including repositories with separate frontend and backend packages.
 
-[Unreleased]: https://github.com/Ikabhishek/DevLens/compare/v1.0.3...HEAD
+[Unreleased]: https://github.com/Ikabhishek/DevLens/compare/v1.0.4...HEAD
+[1.0.4]: https://github.com/Ikabhishek/DevLens/releases/tag/v1.0.4
 [1.0.3]: https://github.com/Ikabhishek/DevLens/releases/tag/v1.0.3

@@ -4,125 +4,13 @@ import { ArchitectureModel } from '../analyzer/architectureAnalyzer';
 import { AstAnalysis } from '../analyzer/astAnalyzer';
 import { DependencyGraph } from '../graph/dependencyGraph';
 import { ProjectModel } from '../models/projectModel';
+import { generateDevLensPdfReport } from '../report/pdfReportGenerator';
 
 export interface DashboardData {
     project: ProjectModel;
     ast: AstAnalysis;
     graph: DependencyGraph;
     architecture: ArchitectureModel;
-}
-
-function reportLines(data: DashboardData): string[] {
-    const languageLines = Object.entries(data.project.languageCounts)
-        .sort(([, left], [, right]) => right - left)
-        .map(([language, count]) => `  • ${language}: ${count} files`);
-    const architectureLines = data.architecture.components.length
-        ? data.architecture.components.map(component =>
-            `  • ${component.name} (${component.category}) — ${component.evidence}`
-        )
-        : ['  • No recognised technologies detected.'];
-    const dependencyLines = mostConnected(data.graph).length
-        ? mostConnected(data.graph).map(item =>
-            `  • ${item.file}: ${item.count} local connections`
-        )
-        : ['  • No resolved local dependencies found.'];
-
-    return [
-        'DEVLENS PROJECT REPORT',
-        `Project: ${data.project.name}`,
-        `Generated: ${new Date().toLocaleString()}`,
-        '',
-        'WORKSPACE SUMMARY',
-        `Files: ${data.project.totalFiles}`,
-        `Folders: ${data.project.totalFolders}`,
-        `Total size: ${data.project.totalSizeBytes >= 1024 * 1024
-            ? `${(data.project.totalSizeBytes / (1024 * 1024)).toFixed(1)} MB`
-            : `${Math.max(1, Math.round(data.project.totalSizeBytes / 1024))} KB`}`,
-        `Configuration files: ${data.project.configFiles.length}`,
-        '',
-        'LANGUAGES',
-        ...languageLines,
-        '',
-        'DETECTED ARCHITECTURE',
-        ...architectureLines,
-        '',
-        'CODE ANALYSIS',
-        `Functions: ${data.ast.totals.functions}`,
-        `Classes: ${data.ast.totals.classes}`,
-        `Methods: ${data.ast.totals.methods}`,
-        `Variables: ${data.ast.totals.variables}`,
-        `Function calls: ${data.ast.totals.calls}`,
-        `Local dependencies: ${data.graph.edges.length}`,
-        '',
-        'MOST CONNECTED MODULES',
-        ...dependencyLines
-    ];
-}
-
-function wrapPdfLine(line: string, limit = 92): string[] {
-    if (line.length <= limit) return [line];
-    const result: string[] = [];
-    let remaining = line;
-    while (remaining.length > limit) {
-        const breakAt = remaining.lastIndexOf(' ', limit);
-        const index = breakAt > 0 ? breakAt : limit;
-        result.push(remaining.slice(0, index));
-        remaining = remaining.slice(index).trimStart();
-    }
-    result.push(remaining);
-    return result;
-}
-
-function escapePdfText(value: string): string {
-    return value
-        .replace(/[^\x20-\x7e]/g, '?')
-        .replace(/\\/g, '\\\\')
-        .replace(/\(/g, '\\(')
-        .replace(/\)/g, '\\)');
-}
-
-function createProjectReportPdf(data: DashboardData): Uint8Array {
-    const lines = reportLines(data).flatMap(line => wrapPdfLine(line));
-    const linesPerPage = 43;
-    const pages = Array.from(
-        { length: Math.max(1, Math.ceil(lines.length / linesPerPage)) },
-        (_, index) => lines.slice(index * linesPerPage, (index + 1) * linesPerPage)
-    );
-    const objects: string[] = [];
-    const pageReferences = pages.map((_, index) => `${4 + index * 2} 0 R`);
-    objects[1] = '<< /Type /Catalog /Pages 2 0 R >>';
-    objects[2] = `<< /Type /Pages /Kids [${pageReferences.join(' ')}] /Count ${pages.length} >>`;
-    objects[3] = '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>';
-
-    pages.forEach((pageLines, index) => {
-        const pageObject = 4 + index * 2;
-        const contentObject = pageObject + 1;
-        const content = [
-            'BT',
-            '/F1 16 Tf',
-            '50 800 Td',
-            `(${escapePdfText(pageLines[0] ?? 'DevLens Project Report')}) Tj`,
-            '/F1 10 Tf',
-            ...pageLines.slice(1).flatMap(line => ['0 -17 Td', `(${escapePdfText(line)}) Tj`]),
-            'ET'
-        ].join('\n');
-        objects[pageObject] = `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 842] /Resources << /Font << /F1 3 0 R >> >> /Contents ${contentObject} 0 R >>`;
-        objects[contentObject] = `<< /Length ${Buffer.byteLength(content, 'ascii')} >>\nstream\n${content}\nendstream`;
-    });
-
-    let pdf = '%PDF-1.4\n';
-    const offsets: number[] = [0];
-    for (let index = 1; index < objects.length; index++) {
-        offsets[index] = Buffer.byteLength(pdf, 'ascii');
-        pdf += `${index} 0 obj\n${objects[index]}\nendobj\n`;
-    }
-    const xrefOffset = Buffer.byteLength(pdf, 'ascii');
-    pdf += `xref\n0 ${objects.length}\n0000000000 65535 f \n`;
-    for (let index = 1; index < objects.length; index++) {
-        pdf += `${String(offsets[index]).padStart(10, '0')} 00000 n \n`;
-    }
-    pdf += `trailer\n<< /Size ${objects.length} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`;
-    return Buffer.from(pdf, 'ascii');
 }
 
 let activeDashboardInstance: { panel: vscode.WebviewPanel; render: () => Promise<void> } | undefined;
@@ -199,7 +87,7 @@ export async function showDashboard(
             });
             if (!destination) return;
             try {
-                await vscode.workspace.fs.writeFile(destination, createProjectReportPdf(reportData));
+                await vscode.workspace.fs.writeFile(destination, generateDevLensPdfReport(reportData));
                 vscode.window.showInformationMessage(`DevLens: Project report saved to ${destination.fsPath}`);
             } catch (error) {
                 const details = error instanceof Error ? error.message : String(error);
