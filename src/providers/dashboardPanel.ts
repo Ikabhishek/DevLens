@@ -13,7 +13,10 @@ export interface DashboardData {
     architecture: ArchitectureModel;
 }
 
-let activeDashboardInstance: { panel: vscode.WebviewPanel; render: () => Promise<void> } | undefined;
+let activeDashboardInstance: {
+    panel: vscode.WebviewPanel;
+    render: (forceRescan?: boolean) => Promise<void>;
+} | undefined;
 
 export function refreshActiveDashboard(): void {
     if (activeDashboardInstance) {
@@ -24,7 +27,7 @@ export function refreshActiveDashboard(): void {
 export async function showDashboard(
     rootUri: vscode.Uri,
     extensionUri: vscode.Uri,
-    loadDashboard: () => Promise<DashboardData>
+    loadDashboard: (forceRescan?: boolean) => Promise<DashboardData>
 ): Promise<void> {
     if (activeDashboardInstance) {
         activeDashboardInstance.panel.reveal();
@@ -42,11 +45,15 @@ export async function showDashboard(
         }
     );
 
-    const render = async (): Promise<void> => {
+    const render = async (forceRescan = false): Promise<void> => {
         const logoUri = panel.webview.asWebviewUri(
             vscode.Uri.joinPath(extensionUri, 'resources', 'devlens.svg')
         ).toString();
-        panel.webview.html = getWebviewContent(await loadDashboard(), logoUri, panel.webview.cspSource);
+        panel.webview.html = getWebviewContent(
+            await loadDashboard(forceRescan),
+            logoUri,
+            panel.webview.cspSource
+        );
     };
 
     activeDashboardInstance = { panel, render };
@@ -70,7 +77,7 @@ export async function showDashboard(
     panel.webview.onDidReceiveMessage(async message => {
         if (message.command === 'refresh') {
             try {
-                await render();
+                await render(true);
             } catch (error) {
                 const details = error instanceof Error ? error.message : String(error);
                 vscode.window.showErrorMessage(`DevLens dashboard refresh failed: ${details}`);
@@ -244,10 +251,10 @@ ul { margin: 0; padding-left: 18px; } li { margin: 8px 0; } .file-link { border:
 .filter-pill.active { border-color: var(--vscode-focusBorder); background: color-mix(in srgb, var(--vscode-focusBorder) 22%, var(--vscode-sideBar-background)); font-weight: 600; }
 .pill-badge { font-size: 10px; opacity: .75; min-width: 14px; text-align: center; }
 #architecture-graph { display: block; width: 100%; height: 500px; margin-top: 10px; border-radius: 8px; background: var(--vscode-editor-background); cursor: grab; } #architecture-graph:active { cursor: grabbing; } .graph-legend { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 10px; font-size: 11px; color: var(--vscode-descriptionForeground); } .graph-legend span { display: inline-flex; align-items: center; gap: 6px; } .legend-dot { width: 9px; height: 9px; border-radius: 3px; display: inline-block; }
-.graph-controls { display: flex; align-items: center; gap: 6px; margin-top: 8px; flex-wrap: wrap; } .graph-controls input { flex: 1; min-width: 120px; padding: 6px 9px; color: var(--vscode-input-foreground); background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius: 6px; font-size: 12px; } .graph-controls button { padding: 5px 9px; color: var(--vscode-button-secondaryForeground, var(--vscode-foreground)); background: var(--vscode-button-secondaryBackground, var(--vscode-editor-background)); border: 1px solid var(--vscode-panel-border); border-radius: 6px; font-size: 12px; } .graph-controls button.active { color: var(--vscode-button-foreground); background: var(--vscode-button-background); border-color: var(--vscode-focusBorder); } button:focus-visible, input:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
-.graph-node { cursor: pointer; animation: graph-node-enter .32s ease-out both; animation-delay: var(--enter-delay, 0ms); } .graph-node:hover rect { stroke: var(--vscode-focusBorder); stroke-width: 3; } .graph-node.selected rect { stroke: var(--vscode-focusBorder); stroke-width: 4; animation: graph-node-pulse 1.6s ease-in-out infinite; } .graph-node.dimmed, .graph-edge.dimmed { opacity: .14; } .graph-edge { cursor: pointer; pointer-events: stroke; opacity: .8; animation: graph-edge-enter .28s ease-out both; animation-delay: var(--enter-delay, 0ms); } .graph-edge:hover, .graph-edge.highlighted { stroke-width: 4; opacity: 1; } .graph-edge.flowing { stroke-dasharray: 8 8; stroke-width: 4; opacity: 1; animation: graph-flow 1.1s linear infinite; }
-@keyframes graph-node-enter { from { opacity: 0; } to { opacity: 1; } } @keyframes graph-edge-enter { from { opacity: 0; } to { opacity: .8; } } @keyframes graph-node-pulse { 50% { filter: brightness(1.35); } } @keyframes graph-flow { to { stroke-dashoffset: -32; } }
-@media (prefers-reduced-motion: reduce) { .graph-node, .graph-edge, .graph-node.selected rect, .graph-edge.flowing { animation: none; } }
+.graph-controls { display: flex; align-items: center; gap: 6px; margin-top: 8px; flex-wrap: wrap; } .graph-controls input { flex: 1; min-width: 120px; padding: 6px 9px; color: var(--vscode-input-foreground); background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius: 6px; font-size: 12px; } .graph-controls button { padding: 5px 9px; color: var(--vscode-button-secondaryForeground, var(--vscode-foreground)); background: var(--vscode-button-secondaryBackground, var(--vscode-editor-background)); border: 1px solid var(--vscode-panel-border); border-radius: 6px; font-size: 12px; } .graph-controls button.active { color: var(--vscode-button-foreground); background: var(--vscode-button-background); border-color: var(--vscode-focusBorder); } .graph-status { min-height: 16px; margin: 6px 0 0; color: var(--vscode-descriptionForeground); font-size: 11px; } button:focus-visible, input:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
+.graph-node { cursor: pointer; transition: opacity .2s ease; } .graph-node:hover rect { stroke: var(--vscode-focusBorder); stroke-width: 3; } .graph-node.selected rect { stroke: var(--vscode-focusBorder) !important; stroke-width: 4 !important; animation: graph-node-pulse 1.6s ease-in-out infinite; } .graph-node.search-matched rect { stroke: #38bdf8 !important; stroke-width: 3.5 !important; filter: drop-shadow(0 0 6px #38bdf8); } .graph-node.dependency-highlighted rect { stroke: #2dd4bf !important; stroke-width: 3.5 !important; } .graph-node.dimmed { opacity: .12 !important; pointer-events: none; } .graph-edge { cursor: pointer; pointer-events: stroke; opacity: .8; transition: opacity .2s ease, stroke-width .2s ease; } .graph-edge:hover, .graph-edge.highlighted { stroke-width: 4; opacity: 1 !important; } .graph-edge.flowing { stroke-dasharray: 8 8; stroke-width: 4; opacity: 1 !important; animation: graph-flow 1.1s linear infinite; } .graph-edge.dimmed { opacity: .04 !important; pointer-events: none; }
+@keyframes graph-node-pulse { 50% { filter: brightness(1.35); } } @keyframes graph-flow { to { stroke-dashoffset: -32; } }
+@media (prefers-reduced-motion: reduce) { .graph-node.selected rect, .graph-edge.flowing { animation: none; } }
 .detail-card { height: 100%; } .detail-card h2 { margin-bottom: 4px; } .detail-empty { color: var(--vscode-descriptionForeground); font-size: 13px; line-height: 1.5; } .detail-row { display: flex; justify-content: space-between; gap: 12px; padding: 7px 0; border-bottom: 1px solid var(--vscode-panel-border); font-size: 12px; } .detail-row span:first-child { color: var(--vscode-descriptionForeground); } .detail-path { overflow-wrap: anywhere; margin: 9px 0; font-size: 12px; font-weight: 600; } .detail-actions { display: flex; gap: 6px; margin: 10px 0; flex-wrap: wrap; } .detail-actions button { border: 1px solid var(--vscode-panel-border); border-radius: 5px; color: var(--vscode-foreground); background: var(--vscode-editor-background); padding: 5px 8px; }
 .actions { margin-top: 14px; } .action-grid { display: grid; grid-template-columns: repeat(2, minmax(200px, 1fr)); gap: 10px; } .action-card { display: flex; gap: 12px; align-items: center; width: 100%; min-height: 74px; border: 1px solid var(--vscode-panel-border); border-radius: 9px; padding: 12px; color: var(--vscode-foreground); background: var(--vscode-sideBar-background); text-align: left; } .action-card:hover { border-color: var(--vscode-focusBorder); background: var(--vscode-list-hoverBackground); } .action-icon { width: 30px; font-size: 22px; color: var(--vscode-textLink-foreground); text-align: center; } .action-card strong, .action-card small { display: block; } .action-card small { color: var(--vscode-descriptionForeground); margin-top: 4px; } .action-arrow { margin-left: auto; font-size: 26px; color: var(--vscode-descriptionForeground); }
 @media (max-width: 900px) { body { padding: 16px; } .hero { align-items: flex-start; flex-direction: column; gap: 12px; } .project-meta { text-align: left; } .hero-actions { justify-content: flex-start; } .workspace-grid, .grid { grid-template-columns: 1fr; } #architecture-graph { height: 400px; } .action-grid { grid-template-columns: 1fr; } }
@@ -258,7 +265,7 @@ ul { margin: 0; padding-left: 18px; } li { margin: 8px 0; } .file-link { border:
   <span class="bc-current">Project Architecture & Dashboard</span>
 </nav>
 <section class="hero"><div class="brand"><div class="logo"><img src="${escapeHtml(logoUri)}" alt="DevLens"></div><div><h1>DevLens</h1><p class="muted">Understand your codebase through architecture and code relationships.</p></div></div><div class="project-meta"><strong>${escapeHtml(data.project.name)}</strong><p class="muted">Last scanned: ${escapeHtml(date)}</p><div class="hero-actions"><button class="report-download" id="download-report">Download PDF report</button><button class="refresh" id="refresh">Refresh dashboard</button></div></div></section>
-<section class="workspace-grid"><article class="architecture"><div class="architecture-heading"><div><h2>Code architecture</h2><p class="muted">Resolved imports · select a node or edge · drag to pan</p></div><span class="muted">${graphData.nodes.length} connected files</span></div><div class="category-filters"><button class="filter-pill active" data-category="all">All <span class="pill-badge">${categoryCounts.all}</span></button><button class="filter-pill" data-category="component"><i class="legend-dot" style="background:#2dd4bf"></i>Components <span class="pill-badge">${categoryCounts.component}</span></button><button class="filter-pill" data-category="page"><i class="legend-dot" style="background:#38bdf8"></i>Pages / Entry <span class="pill-badge">${categoryCounts.page}</span></button><button class="filter-pill" data-category="utility"><i class="legend-dot" style="background:#fb923c"></i>Services / Utils <span class="pill-badge">${categoryCounts.utility}</span></button><button class="filter-pill" data-category="module"><i class="legend-dot" style="background:#a78bfa"></i>Modules <span class="pill-badge">${categoryCounts.module}</span></button></div><div class="graph-controls"><input id="graph-search" type="search" placeholder="Search files…" aria-label="Search files in graph"><button id="layout-toggle" title="Switch layout between Hierarchical Layers and Group by Type">Layout: Hierarchical</button><button id="zoom-out" title="Zoom out">−</button><button id="zoom-in" title="Zoom in">+</button><button id="fit-graph">Fit</button><button id="highlight-deps">Highlight dependencies</button></div><svg id="architecture-graph" role="img" aria-label="Interactive project architecture graph"></svg><div class="graph-legend"><span><i class="legend-dot" style="background:#2dd4bf"></i>Component</span><span><i class="legend-dot" style="background:#38bdf8"></i>Page / entry</span><span><i class="legend-dot" style="background:#fb923c"></i>Service / utility</span><span><i class="legend-dot" style="background:#a78bfa"></i>Module</span></div></article>
+<section class="workspace-grid"><article class="architecture"><div class="architecture-heading"><div><h2>Code architecture</h2><p class="muted">Resolved imports · select a node or edge · drag to pan</p></div><span class="muted">${graphData.nodes.length} connected files</span></div><div class="category-filters"><button class="filter-pill active" data-category="all">All <span class="pill-badge">${categoryCounts.all}</span></button><button class="filter-pill" data-category="component"><i class="legend-dot" style="background:#2dd4bf"></i>Components <span class="pill-badge">${categoryCounts.component}</span></button><button class="filter-pill" data-category="page"><i class="legend-dot" style="background:#38bdf8"></i>Pages / Entry <span class="pill-badge">${categoryCounts.page}</span></button><button class="filter-pill" data-category="utility"><i class="legend-dot" style="background:#fb923c"></i>Services / Utils <span class="pill-badge">${categoryCounts.utility}</span></button><button class="filter-pill" data-category="module"><i class="legend-dot" style="background:#a78bfa"></i>Modules <span class="pill-badge">${categoryCounts.module}</span></button></div><div class="graph-controls"><input id="graph-search" type="search" placeholder="Search files…" aria-label="Search files in graph"><button id="layout-toggle" title="Switch layout between Hierarchical Layers and Group by Type">Layout: Hierarchical</button><button id="zoom-out" title="Zoom out">−</button><button id="zoom-in" title="Zoom in">+</button><button id="fit-graph">Fit</button><button id="highlight-deps">Highlight dependencies</button></div><p id="graph-status" class="graph-status" role="status" aria-live="polite">Showing all connected files.</p><svg id="architecture-graph" role="img" aria-label="Interactive project architecture graph"></svg><div class="graph-legend"><span><i class="legend-dot" style="background:#2dd4bf"></i>Component</span><span><i class="legend-dot" style="background:#38bdf8"></i>Page / entry</span><span><i class="legend-dot" style="background:#fb923c"></i>Service / utility</span><span><i class="legend-dot" style="background:#a78bfa"></i>Module</span></div></article>
 <aside class="panel detail-card"><h2>File Structure</h2><p class="muted">Workspace overview</p><div class="stats"><div class="stat"><strong>${data.project.totalFiles}</strong><span>Files</span></div><div class="stat"><strong>${data.project.totalFolders}</strong><span>Folders</span></div><div class="stat"><strong>${formatSize(data.project.totalSizeBytes)}</strong><span>Total size</span></div><div class="stat"><strong>${visibleEdges.length}</strong><span>Dependencies</span></div></div><h2>Selected file</h2><div id="selected-file-details" class="detail-empty">Select a graph node to inspect its imports, dependents, language, and file size.</div><h2 style="margin-top:16px">Selected connection</h2><div id="selected-edge-details" class="detail-empty">Select an edge to see which symbols it imports.</div></aside></section>
 <section class="grid"><article class="panel"><h2>Languages</h2><div class="language-layout"><div class="donut"></div><div class="language-list">${languages.map(language => `<div class="language-row"><span class="color" style="background:${language.color}"></span><span>${escapeHtml(language.name)}</span><span>${language.count} (${language.percentage.toFixed(1)}%)</span></div>`).join('')}</div></div></article><article class="panel"><h2>Project analysis</h2><div class="stats"><div class="stat"><strong>${data.ast.totals.functions}</strong><span>Functions</span></div><div class="stat"><strong>${data.ast.totals.classes}</strong><span>Classes</span></div><div class="stat"><strong>${data.ast.totals.calls}</strong><span>Calls</span></div><div class="stat"><strong>${data.project.configFiles.length}</strong><span>Config files</span></div></div>${frameworkCoverage ? `<p class="muted">${escapeHtml(frameworkCoverage)}</p>` : ''}<h2>Detected technologies</h2><div class="chip-row">${architecture}</div></article><article class="panel"><h2>Configuration files</h2><ul>${configFiles}</ul></article><article class="panel"><h2>Most connected modules</h2><ul>${mostConnected(data.graph).map(item => `<li><button class="file-link" data-file="${escapeHtml(item.file)}">${escapeHtml(item.file)}</button> <span class="muted">${item.count} local connections</span></li>`).join('') || '<li class="muted">No local import connections yet.</li>'}</ul></article></section>
 <section class="actions"><h2>DevLens tools</h2><div class="action-grid">${actionCards}</div></section>
@@ -305,29 +312,65 @@ const selectEdge = index => {
 const updateSelection = () => {
     const searchInput = document.getElementById('graph-search');
     const query = (searchInput ? searchInput.value : '').toLowerCase().trim();
+    let visibleCount = 0;
+
     graph.querySelectorAll('.graph-node').forEach(node => {
         const file = node.dataset.file;
         const nodeData = graphData.nodes.find(n => n.id === file);
         const isSelected = file === selectedFile;
-        const isDependency = Boolean(selectedFile && graphData.edges.some(e => e.from === selectedFile && e.to === file));
+        // Check both outgoing (e.from == selectedFile) and incoming (e.to == selectedFile) dependencies
+        const isDependency = Boolean(selectedFile && graphData.edges.some(e =>
+            (e.from === selectedFile && e.to === file) || (e.to === selectedFile && e.from === file)
+        ));
         const matchesCategory = activeCategory === 'all' || (nodeData && nodeData.category === activeCategory);
-        const matchesSearch = !query || file.toLowerCase().includes(query);
+        const matchesSearch = !query || file.toLowerCase().includes(query) || (nodeData && (nodeData.label.toLowerCase().includes(query) || (nodeData.extension && nodeData.extension.toLowerCase().includes(query))));
+
         node.classList.toggle('selected', isSelected);
+        node.classList.toggle('search-matched', Boolean(query && matchesSearch));
+        node.classList.toggle('dependency-highlighted', Boolean(highlightDependencies && selectedFile && isDependency));
+
         const dim = !matchesCategory || !matchesSearch || (highlightDependencies && Boolean(selectedFile) && !isSelected && !isDependency);
         node.classList.toggle('dimmed', dim);
+        if (!dim) {
+            visibleCount++;
+        }
     });
+
     graph.querySelectorAll('.graph-edge').forEach(edgeElement => {
         const edge = graphData.edges[Number(edgeElement.dataset.edge)];
         const fromNode = graphData.nodes.find(n => n.id === edge?.from);
         const toNode = graphData.nodes.find(n => n.id === edge?.to);
-        const related = Boolean(selectedFile && edge?.from === selectedFile);
-        const matchesCategory = activeCategory === 'all' || fromNode?.category === activeCategory || toNode?.category === activeCategory;
+        const related = Boolean(selectedFile && (edge?.from === selectedFile || edge?.to === selectedFile));
+
+        const fromMatchesCategory = activeCategory === 'all' || fromNode?.category === activeCategory;
+        const toMatchesCategory = activeCategory === 'all' || toNode?.category === activeCategory;
+        const matchesCategory = fromMatchesCategory || toMatchesCategory;
+
+        const fromMatchesSearch = !query || fromNode?.id.toLowerCase().includes(query);
+        const toMatchesSearch = !query || toNode?.id.toLowerCase().includes(query);
+        const matchesSearch = fromMatchesSearch || toMatchesSearch;
+
         const isSelected = Number(edgeElement.dataset.edge) === selectedEdge;
         edgeElement.classList.toggle('highlighted', (highlightDependencies && related) || isSelected);
-        edgeElement.classList.toggle('flowing', related || isSelected);
-        const dim = !matchesCategory || (highlightDependencies && Boolean(selectedFile) && !related);
+        edgeElement.classList.toggle('flowing', (highlightDependencies && related) || isSelected);
+
+        const dim = !matchesCategory || !matchesSearch || (highlightDependencies && Boolean(selectedFile) && !related);
         edgeElement.classList.toggle('dimmed', dim);
     });
+
+    // Provide clear, immediate status message
+    const filterInfo = [];
+    if (activeCategory !== 'all') {
+        filterInfo.push(activeCategory.toUpperCase());
+    }
+    if (query) {
+        filterInfo.push('"' + query + '"');
+    }
+    if (highlightDependencies && selectedFile) {
+        filterInfo.push('Dependencies of ' + selectedFile);
+    }
+    const filterPrefix = filterInfo.length ? '[' + filterInfo.join(' · ') + '] ' : '';
+    setGraphStatus(filterPrefix + 'Showing ' + visibleCount + ' of ' + graphData.nodes.length + ' files.');
 };
 const renderArchitecture = () => {
     if (!graphData.nodes.length) {
@@ -360,10 +403,10 @@ const renderArchitecture = () => {
             const colCenterX = 50 + colIdx * (colWidth + colGap) + colWidth / 2;
             columnHeaderSvg += '<g class="col-header"><rect x="' + (colCenterX - 95) + '" y="14" width="190" height="26" rx="13" fill="' + cat.color + '18" stroke="' + cat.color + '55"></rect><text x="' + colCenterX + '" y="31" text-anchor="middle" fill="' + cat.color + '" font-size="11" font-weight="700" letter-spacing="0.5">' + escapeXml(cat.title) + ' (' + nodesInCat.length + ')</text></g>';
             nodesInCat.forEach((node, rowIdx) => {
-                positions.set(node.id, { x: colCenterX, y: 72 + rowIdx * 70 });
+                positions.set(node.id, { x: colCenterX, y: 88 + rowIdx * 74 });
             });
         });
-        height = Math.max(340, 72 + maxCount * 70 + 30);
+        height = Math.max(360, 88 + maxCount * 74 + 30);
     } else {
         const incoming = new Map(graphData.nodes.map(node => [node.id, 0]));
         const outgoing = new Map(graphData.nodes.map(node => [node.id, []]));
@@ -406,9 +449,104 @@ const renderArchitecture = () => {
     const edges = graphData.edges.map((edge,index) => {
         const from = positions.get(edge.from), to = positions.get(edge.to), target = nodeById.get(edge.to);
         if (!from || !to || !target) { return ''; }
-        const control = Math.max(36, Math.abs(to.y - from.y) / 2);
+
+        let startX, startY, endX, endY, c1x, c1y, c2x, c2y;
+        const dx = to.x - from.x;
+        const dy = to.y - from.y;
+
+        if (currentLayout === 'by-type') {
+            if (Math.abs(dx) > 100) {
+                // Cross-column connection: route horizontally side-to-side
+                if (dx > 0) {
+                    // Left column to right column
+                    startX = from.x + 88;
+                    startY = from.y;
+                    endX = to.x - 88;
+                    endY = to.y;
+                    const ctrlX = Math.min(Math.abs(dx) * 0.45, 140);
+                    c1x = startX + ctrlX;
+                    c1y = startY;
+                    c2x = endX - ctrlX;
+                    c2y = endY;
+                } else {
+                    // Right column to left column (backward flow)
+                    startX = from.x - 88;
+                    startY = from.y;
+                    endX = to.x + 88;
+                    endY = to.y;
+                    const ctrlX = Math.min(Math.abs(dx) * 0.45, 140);
+                    c1x = startX - ctrlX;
+                    c1y = startY;
+                    c2x = endX + ctrlX;
+                    c2y = endY;
+                }
+            } else {
+                // Same column connection
+                if (dy >= 0) {
+                    // Top to bottom
+                    startX = from.x;
+                    startY = from.y + 25;
+                    endX = to.x;
+                    endY = to.y - 25;
+                    const ctrlY = Math.max(16, dy / 2);
+                    c1x = startX;
+                    c1y = startY + ctrlY;
+                    c2x = endX;
+                    c2y = endY - ctrlY;
+                } else {
+                    // Bottom to top: loop around right side to avoid crossing header
+                    startX = from.x + 88;
+                    startY = from.y;
+                    endX = to.x + 88;
+                    endY = to.y;
+                    const loopX = startX + 38;
+                    c1x = loopX;
+                    c1y = startY;
+                    c2x = loopX;
+                    c2y = endY;
+                }
+            }
+        } else {
+            // Hierarchical layout
+            if (dy >= 0) {
+                startX = from.x;
+                startY = from.y + 25;
+                endX = to.x;
+                endY = to.y - 25;
+                const ctrlY = Math.max(36, dy / 2);
+                c1x = startX;
+                c1y = startY + ctrlY;
+                c2x = endX;
+                c2y = endY - ctrlY;
+            } else {
+                // Backward in hierarchy: route around side
+                if (dx >= 0) {
+                    startX = from.x + 88;
+                    startY = from.y;
+                    endX = to.x + 88;
+                    endY = to.y;
+                    const loopX = Math.max(startX, endX) + 36;
+                    c1x = loopX;
+                    c1y = startY;
+                    c2x = loopX;
+                    c2y = endY;
+                } else {
+                    startX = from.x - 88;
+                    startY = from.y;
+                    endX = to.x - 88;
+                    endY = to.y;
+                    const loopX = Math.min(startX, endX) - 36;
+                    c1x = loopX;
+                    c1y = startY;
+                    c2x = loopX;
+                    c2y = endY;
+                }
+            }
+        }
+
+        const pathD = 'M ' + startX + ' ' + startY + ' C ' + c1x + ' ' + c1y + ', ' + c2x + ' ' + c2y + ', ' + endX + ' ' + endY;
         const title = edge.names.length ? 'Imports: ' + edge.names.join(', ') : 'Imports module';
-        return '<path class="graph-edge" data-edge="' + index + '" style="--enter-delay:' + Math.min(index * 26, 420) + 'ms" d="M ' + from.x + ' ' + (from.y + 25) + ' C ' + from.x + ' ' + (from.y + control) + ', ' + to.x + ' ' + (to.y - control) + ', ' + to.x + ' ' + (to.y - 25) + '" stroke="' + colors[target.category] + '" fill="none" stroke-width="2" marker-end="url(#arrow-' + target.category + ')"><title>' + escapeXml(title) + '</title></path>';
+        return '<path class="graph-edge" data-edge="' + index + '" style="--enter-delay:' + Math.min(index * 26, 420) + 'ms" d="' + pathD + '" stroke="' + colors[target.category] + '" fill="none" stroke-width="2" marker-end="url(#arrow-' + target.category + ')"><title>' + escapeXml(title) + '</title></path>';
     }).join('');
     const nodes = graphData.nodes.map((node,index) => {
         const point = positions.get(node.id);
@@ -419,7 +557,7 @@ const renderArchitecture = () => {
 
     graph.setAttribute('viewBox', '0 0 ' + width + ' ' + height);
     graph.dataset.initialViewBox = '0 0 ' + width + ' ' + height;
-    graph.innerHTML = '<defs>' + markers + '</defs>' + columnHeaderSvg + edges + nodes;
+    graph.innerHTML = '<defs>' + markers + '</defs>' + edges + nodes + columnHeaderSvg;
 
     graph.querySelectorAll('.graph-node').forEach(node => {
         const select = () => selectFile(node.dataset.file);
@@ -432,47 +570,76 @@ const renderArchitecture = () => {
     }));
     updateSelection();
 };
-renderArchitecture();
-
-// Category filter pills
-document.querySelectorAll('.filter-pill').forEach(pill => {
-    pill.addEventListener('click', () => {
-        activeCategory = pill.dataset.category || 'all';
-        document.querySelectorAll('.filter-pill').forEach(p => p.classList.toggle('active', p === pill));
-        updateSelection();
-    });
-});
-
-// Layout switcher
-const layoutToggle = document.getElementById('layout-toggle');
-if (layoutToggle) {
-    layoutToggle.addEventListener('click', () => {
-        currentLayout = currentLayout === 'hierarchical' ? 'by-type' : 'hierarchical';
-        layoutToggle.textContent = currentLayout === 'hierarchical' ? 'Layout: Hierarchical' : 'Layout: Group by Type';
-        layoutToggle.classList.toggle('active', currentLayout === 'by-type');
+const graphStatus = document.getElementById('graph-status');
+const setGraphStatus = message => {
+    if (graphStatus) graphStatus.textContent = message;
+};
+const renderGraphSafely = () => {
+    try {
         renderArchitecture();
-    });
-}
+    } catch (error) {
+        console.error('DevLens graph render failed', error);
+        graph.innerHTML = '<text x="24" y="44" fill="var(--vscode-errorForeground)">DevLens could not render this graph. Refresh the dashboard to retry.</text>';
+        setGraphStatus('Graph rendering failed. Other dashboard controls are still available.');
+    }
+};
 
-// Graph search
 const searchInput = document.getElementById('graph-search');
 if (searchInput) {
-    searchInput.addEventListener('input', () => updateSelection());
+    searchInput.addEventListener('input', () => {
+        updateSelection();
+    });
 }
 
-document.getElementById('highlight-deps').addEventListener('click', event => {
-    highlightDependencies = !highlightDependencies;
-    event.currentTarget.classList.toggle('active', highlightDependencies);
-    updateSelection();
-});
 const zoom = factor => {
     const box = graph.viewBox.baseVal;
     const width = box.width * factor, height = box.height * factor;
     graph.setAttribute('viewBox', (box.x - (width - box.width) / 2) + ' ' + (box.y - (height - box.height) / 2) + ' ' + width + ' ' + height);
 };
-document.getElementById('zoom-in').addEventListener('click', () => zoom(0.82));
-document.getElementById('zoom-out').addEventListener('click', () => zoom(1.22));
-document.getElementById('fit-graph').addEventListener('click', () => graph.setAttribute('viewBox', graph.dataset.initialViewBox));
+document.addEventListener('click', event => {
+    const target = event.target instanceof Element ? event.target.closest('button') : null;
+    if (!target) return;
+    if (target.classList.contains('filter-pill')) {
+        activeCategory = target.dataset.category || 'all';
+        document.querySelectorAll('.filter-pill').forEach(pill =>
+            pill.classList.toggle('active', pill === target)
+        );
+        updateSelection();
+        setGraphStatus('Showing ' + target.textContent.trim() + ' files.');
+    } else if (target.id === 'layout-toggle') {
+        currentLayout = currentLayout === 'hierarchical' ? 'by-type' : 'hierarchical';
+        target.textContent = currentLayout === 'hierarchical' ? 'Layout: Hierarchical' : 'Layout: Group by Type';
+        target.classList.toggle('active', currentLayout === 'by-type');
+        renderGraphSafely();
+        setGraphStatus('Layout changed to ' +
+            (currentLayout === 'hierarchical' ? 'hierarchical' : 'group by type') + '.');
+    } else if (target.id === 'zoom-in') {
+        zoom(0.82);
+        setGraphStatus('Graph zoomed in.');
+    } else if (target.id === 'zoom-out') {
+        zoom(1.22);
+        setGraphStatus('Graph zoomed out.');
+    } else if (target.id === 'fit-graph') {
+        graph.setAttribute('viewBox', graph.dataset.initialViewBox);
+        setGraphStatus('Graph fitted to the available space.');
+    } else if (target.id === 'highlight-deps') {
+        highlightDependencies = !highlightDependencies;
+        target.classList.toggle('active', highlightDependencies);
+        if (highlightDependencies && !selectedFile && graphData.nodes.length > 0) {
+            // If no node selected, auto-select the most connected node so dependencies immediately light up
+            const mostConn = graphData.nodes.slice().sort((a, b) => {
+                const countA = graphData.edges.filter(e => e.from === a.id || e.to === a.id).length;
+                const countB = graphData.edges.filter(e => e.from === b.id || e.to === b.id).length;
+                return countB - countA;
+            })[0];
+            if (mostConn) {
+                selectFile(mostConn.id);
+                return;
+            }
+        }
+        updateSelection();
+    }
+});
 let panStart;
 graph.addEventListener('pointerdown', event => {
     if (event.target.closest('.graph-node, .graph-edge')) { return; }
@@ -490,10 +657,17 @@ graph.addEventListener('wheel', event => {
     event.preventDefault();
     zoom(event.deltaY > 0 ? 1.12 : 0.89);
 }, { passive: false });
-document.getElementById('refresh').addEventListener('click', () => vscode.postMessage({command:'refresh'}));
-document.getElementById('download-report').addEventListener('click', () => vscode.postMessage({command:'downloadReport'}));
+const refreshButton = document.getElementById('refresh');
+if (refreshButton) {
+    refreshButton.addEventListener('click', () => vscode.postMessage({command:'refresh'}));
+}
+const downloadReportButton = document.getElementById('download-report');
+if (downloadReportButton) {
+    downloadReportButton.addEventListener('click', () => vscode.postMessage({command:'downloadReport'}));
+}
 document.querySelectorAll('.action-card').forEach(button => button.addEventListener('click', () => vscode.postMessage({command:'runFeature', feature:button.dataset.command})));
 document.querySelectorAll('.file-link').forEach(button => button.addEventListener('click', () => vscode.postMessage({command:'openFile', filePath:button.dataset.file})));
+renderGraphSafely();
 </script></body></html>`;
 }
 

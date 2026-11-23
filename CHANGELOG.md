@@ -22,6 +22,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ### Fixed
 
+- Fixed category filter pills, file search input, and dependency highlighting in the dashboard architecture graph where CSS animation fill-mode was overriding the dimming state and preventing visual filtering.
+- Fixed edge arrows overlapping column header titles in the "Group by Type" dashboard architecture view by introducing horizontal side-to-side edge routing and increasing header clearance.
 - Resolved broken bullet point characters (`?`) in PDF reports caused by non-ASCII character sanitization by replacing them with native vector bullet elements.
 - Excluded internal build cache artifacts (such as `.angular/cache/...` chunks) from the most connected modules list and dependency graph analysis.
 
@@ -64,6 +66,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - Removed an SVG edge fill that could render as black shapes in the architecture graph.
 - Preserved the complete project file set during incremental dependency resolution.
 - Detect frameworks across nested package manifests, including repositories with separate frontend and backend packages.
+- Restored dashboard graph controls with resilient event handling and visible action feedback.
 
 [Unreleased]: https://github.com/Ikabhishek/DevLens/compare/v1.0.4...HEAD
 [1.0.4]: https://github.com/Ikabhishek/DevLens/releases/tag/v1.0.4

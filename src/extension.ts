@@ -31,8 +31,15 @@ function getDevLensConfig(): { exclude: string[]; traceMaxDepth: number; enableF
     };
 }
 
-async function loadDashboardData(workspaceUri: vscode.Uri): Promise<DashboardData> {
-    const snapshot = await analysisCache.getSnapshot(workspaceUri, false, getDevLensConfig().exclude);
+async function loadDashboardData(
+    workspaceUri: vscode.Uri,
+    forceRescan = false
+): Promise<DashboardData> {
+    const snapshot = await analysisCache.getSnapshot(
+        workspaceUri,
+        forceRescan,
+        getDevLensConfig().exclude
+    );
     return {
         project: snapshot.project,
         ast: snapshot.ast,
@@ -156,7 +163,7 @@ const openDashboard = vscode.commands.registerCommand(
                 () => showDashboard(
                     workspace.uri,
                     context.extensionUri,
-                    () => loadDashboardData(workspace.uri)
+                    forceRescan => loadDashboardData(workspace.uri, forceRescan)
                 )
             );
         } catch (error) {
